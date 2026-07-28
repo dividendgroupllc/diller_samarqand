@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+    size: A4 landscape;
+    margin: 12mm 8mm 14mm 8mm;
+
+    @bottom-center {
+        content: "Бет " counter(page) " / " counter(pages);
+        font-family: 'DejaVu Sans', Arial, sans-serif;
+        font-size: 7pt;
+        color: #555;
+    }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'DejaVu Sans', 'FreeSans', 'Arial Unicode MS', Arial, sans-serif;
+    font-size: 8pt;
+    color: #000;
+    background: #fff;
+}
+
+.report-header {
+    text-align: center;
+    margin-bottom: 7px;
+    border-bottom: 2px solid #333;
+    padding-bottom: 6px;
+}
+
+.report-title {
+    font-size: 12pt;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+}
+
+.report-period {
+    font-size: 8.5pt;
+    margin-top: 3px;
+    color: #333;
+}
+
+.report-meta {
+    font-size: 8.5pt;
+    margin-bottom: 7px;
+    line-height: 1.6;
+}
+
+.report-meta strong { font-weight: bold; }
+
+table.main-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7pt;
+    margin-bottom: 10px;
+    page-break-inside: auto;
+    table-layout: fixed;
+}
+
+table.main-table thead {
+    display: table-header-group;
+}
+
+table.main-table thead tr {
+    background-color: #c8c8c8;
+}
+
+table.main-table th {
+    border: 1px solid #888;
+    padding: 4px 2px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 7.5pt;
+    word-wrap: break-word;
+}
+
+table.main-table td {
+    border: 1px solid #bbb;
+    padding: 2px 3px;
+    vertical-align: middle;
+    word-wrap: break-word;
+}
+
+table.main-table tbody tr {
+    page-break-inside: avoid;
+}
+
+.opening-row td {
+    background-color: #ebebeb;
+    font-weight: bold;
+}
+
+.total-row td {
+    background-color: #cce5ff;
+    font-weight: bold;
+}
+
+.col-r  { text-align: right; white-space: nowrap; }
+.col-c  { text-align: center; white-space: nowrap; }
+
+.summary-section {
+    page-break-inside: avoid;
+    margin-top: 6px;
+}
+
+.summary-title {
+    font-size: 9pt;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+table.summary-table {
+    width: 56%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+}
+
+table.summary-table th,
+table.summary-table td {
+    border: 1px solid #aaa;
+    padding: 5px 8px;
+}
+
+table.summary-table thead tr {
+    background-color: #e8e8e8;
+}
+
+.credit-header { color: #c62828; font-weight: bold; text-align: right; }
+.debit-header  { color: #1b5e20; font-weight: bold; text-align: right; }
+.num-credit    { text-align: right; color: #c62828; }
+.num-debit     { text-align: right; color: #1b5e20; }
+
+.closing-row td {
+    background-color: #cce5ff;
+    font-weight: bold;
+}
+
+.signatures {
+    margin-top: 22px;
+    page-break-inside: avoid;
+}
+
+table.sig-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table.sig-table td {
+    width: 50%;
+    padding: 0 15px;
+    vertical-align: bottom;
+    font-size: 9pt;
+    line-height: 1.8;
+}
+
+.sig-party { font-weight: bold; font-size: 9.5pt; }
+
+.sig-line {
+    display: inline-block;
+    border-bottom: 1px solid #000;
+    width: 200px;
+    margin-left: 5px;
+}
+</style>
+</head>
+<body>
+<div class="report-header">
+    <div class="report-title">AKT SVERKA / АКТ СВЕРКИ ВЗАИМОРАСЧЁТОВ</div>
+    <div class="report-period">
+        {{ from_date }} дан {{ to_date }} гача
+        &nbsp;/&nbsp;
+        за период с {{ from_date }} по {{ to_date }}
+    </div>
+</div>
+
+<div class="report-meta">
+    <strong>Компания:</strong> {{ company }}
+    &nbsp;&nbsp;&nbsp;
+    <strong>Контрагент:</strong> {{ party }} ({{ party_type }})
+</div>
+
+<table class="main-table">
+    <thead>
+        <tr>
+            <th style="width:7%">Сана</th>
+            <th style="width:10%">Ҳужжат</th>
+            <th style="width:11%">Ҳужжат №</th>
+            <th style="width:23%">Маҳсулот номи</th>
+            <th style="width:5%">Миқдор</th>
+            <th style="width:8%">Нарх</th>
+            <th style="width:4%">Вал.</th>
+            <th style="width:8%">Кредит</th>
+            <th style="width:8%">Дебет</th>
+            <th style="width:8%">Қолдиқ</th>
+            <th style="width:8%">Коммент</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        {% set is_opening = row.voucher_type == "Boshlang'ich qoldiq" %}
+        {% set is_total = row.voucher_type == "Total" %}
+        <tr class="{% if is_opening %}opening-row{% elif is_total %}total-row{% endif %}">
+            <td class="col-c">{{ row.posting_date or '' }}</td>
+            <td>{% if not is_total %}{{ row.voucher_type or '' }}{% endif %}</td>
+            <td>{{ row.voucher_no or '' }}</td>
+            <td>{{ row.item_name or '' }}</td>
+            <td class="col-r">{% if row.qty is not none and row.qty %}{{ fmt(row.qty) }}{% endif %}</td>
+            <td class="col-r">{% if row.rate is not none and row.rate %}{{ fmt(row.rate) }}{% endif %}</td>
+            <td class="col-c">{{ row.currency or '' }}</td>
+            <td class="col-r">{% if row.credit %}{{ fmt(row.credit) }}{% endif %}</td>
+            <td class="col-r">{% if row.debit %}{{ fmt(row.debit) }}{% endif %}</td>
+            <td class="col-r">{% if row.balance is not none %}{{ fmt(row.balance) }}{% endif %}</td>
+            <td>{{ row.komment or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="summary-section">
+    <div class="summary-title">Умумий ҳисоб / Итоговый расчёт</div>
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th style="width:44%; text-align:left;"></th>
+                <th class="credit-header" style="width:28%;">Кредит (Credit)</th>
+                <th class="debit-header" style="width:28%;">Дебет (Debit)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Остаток на начало</td>
+                <td class="num-credit">{{ fmt(summary.opening_credit) }}</td>
+                <td class="num-debit">{{ fmt(summary.opening_debit) }}</td>
+            </tr>
+            <tr>
+                <td>Оборот по товарам</td>
+                <td class="num-credit">{{ fmt(summary.goods_credit) }}</td>
+                <td class="num-debit">{{ fmt(summary.goods_debit) }}</td>
+            </tr>
+            <tr>
+                <td>Оборот по деньгам</td>
+                <td class="num-credit">{{ fmt(summary.money_credit) }}</td>
+                <td class="num-debit">{{ fmt(summary.money_debit) }}</td>
+            </tr>
+            <tr>
+                <td>Начисления (JE + Salary)</td>
+                <td class="num-credit">{{ fmt(summary.accruals_credit) }}</td>
+                <td class="num-debit">{{ fmt(summary.accruals_debit) }}</td>
+            </tr>
+            <tr class="closing-row">
+                <td>Остаток на конец</td>
+                <td class="num-credit">{{ fmt(summary.closing_credit) }}</td>
+                <td class="num-debit">{{ fmt(summary.closing_debit) }}</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="signatures">
+    <table class="sig-table">
+        <tr>
+            <td>
+                <div class="sig-party">{{ company }}</div>
+                Имзо / Подпись:&nbsp;<span class="sig-line">&nbsp;</span>
+            </td>
+            <td>
+                <div class="sig-party">{{ party }}</div>
+                Имзо / Подпись:&nbsp;<span class="sig-line">&nbsp;</span>
+            </td>
+        </tr>
+    </table>
+</div>
+</body>
+</html>
