@@ -24,6 +24,16 @@ frappe.ui.form.on("Kassa", {
             };
         });
 
+        // Set cost center query — faqat joriy компания bo'yicha, guruh bo'lmagan (leaf) markazlar
+        frm.set_query("cost_center", function() {
+            return {
+                filters: {
+                    company: frm.doc.company,
+                    is_group: 0
+                }
+            };
+        });
+
         // Set mode_of_payment query
         frm.trigger("set_mode_of_payment_query");
 
@@ -78,6 +88,7 @@ frappe.ui.form.on("Kassa", {
         frm.set_value("target_amount_currency", "");
         frm.set_value("party", "");
         frm.set_value("expense_account", "");
+        frm.set_value("cost_center", "");
         frm.trigger("sync_currency_fields");
         frm.trigger("update_exchange_fields");
         frm.trigger("render_currency_info");
@@ -519,6 +530,7 @@ frappe.ui.form.on("Kassa", {
         frm.set_value("expense_account", "");
         frm.set_value("party_name", "");
         frm.set_value("expense_account_name", "");
+        frm.set_value("cost_center", "");
 
         if (frm.doc.party_type === "Расходы") {
             frm.set_df_property("expense_account", "reqd", 1);
@@ -644,6 +656,30 @@ frappe.ui.form.on("Kassa", {
 	                    frm.set_value("expense_account_name", r.account_name);
 	                }
 	            });
+
+	            // Agar cost_center hali tanlanmagan bo'lsa — Expense Cost Center
+	            // mappingidan (sozlangan bo'lsa) taklif sifatida to'ldiramiz.
+	            // Foydalanuvchi istalgan vaqt buni o'zgartirishi mumkin.
+	            if (!frm.doc.cost_center) {
+	                var requested_expense_account = frm.doc.expense_account;
+	                frappe.db.get_value(
+	                    "Expense Cost Center",
+	                    {"expense_account": requested_expense_account},
+	                    "cost_center",
+	                    function(r) {
+	                        // Javob kelguncha foydalanuvchi expense_account'ni
+	                        // o'zgartirgan yoki cost_center'ni qo'lda tanlagan
+	                        // bo'lishi mumkin — shu holatda ustidan yozmaymiz.
+	                        if (
+	                            r && r.cost_center
+	                            && frm.doc.expense_account === requested_expense_account
+	                            && !frm.doc.cost_center
+	                        ) {
+	                            frm.set_value("cost_center", r.cost_center);
+	                        }
+	                    }
+	                );
+	            }
 	        } else {
 	            frm.set_value("expense_account_name", "");
 	        }

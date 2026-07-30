@@ -153,7 +153,12 @@ class UnitTestKassa(FrappeTestCase):
             )
 
     def test_validate_party_rules(self):
-        expense_doc = make_kassa_doc(party_type="Расходы", expense_account="5219 - Exchange Gain/Loss - P", party="X")
+        expense_doc = make_kassa_doc(
+            party_type="Расходы",
+            expense_account="5219 - Exchange Gain/Loss - P",
+            cost_center="Main - P",
+            party="X",
+        )
         expense_doc.validate_party()
         self.assertIsNone(expense_doc.party)
 
@@ -161,14 +166,26 @@ class UnitTestKassa(FrappeTestCase):
             party_type="Дивиденд 1",
             party="Will Be Cleared",
             expense_account="5219 - Exchange Gain/Loss - P",
+            cost_center="Main - P",
         )
         dividend_doc.validate_party()
         self.assertIsNone(dividend_doc.party)
         self.assertIsNone(dividend_doc.expense_account)
+        self.assertIsNone(dividend_doc.cost_center)
 
         party_doc = make_kassa_doc(party_type="Supplier", party=None, expense_account=None)
         with self.assertRaises(frappe.ValidationError):
             party_doc.validate_party()
+
+    def test_validate_party_requires_cost_center_for_expense(self):
+        expense_doc = make_kassa_doc(
+            party_type="Расходы",
+            expense_account="5219 - Exchange Gain/Loss - P",
+            cost_center=None,
+            party=None,
+        )
+        with self.assertRaises(frappe.ValidationError):
+            expense_doc.validate_party()
 
     @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.get_cached_value")
     def test_validate_transfer_requires_same_currency(self, mocked_get_cached_value):

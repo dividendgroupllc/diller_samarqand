@@ -29,6 +29,7 @@
   "column_break_2",
   "expense_account",
   "expense_account_name",
+  "cost_center",
   "section_break_amount",
   "column_break_3",
   "amount",
@@ -244,6 +245,14 @@
    "fieldtype": "Data",
    "label": "Название счета",
    "read_only": 1
+  },
+  {
+   "depends_on": "eval:in_list(['Приход', 'Расход'], doc.transaction_type) && doc.party_type === 'Расходы'",
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Центр затрат",
+   "mandatory_depends_on": "eval:in_list(['Приход', 'Расход'], doc.transaction_type) && doc.party_type === 'Расходы'",
+   "options": "Cost Center"
   },
   {
    "depends_on": "eval:doc.transaction_type !== 'Конвертация'",

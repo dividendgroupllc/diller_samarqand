@@ -16,7 +16,6 @@ DIVIDEND_ACCOUNT_NUMBERS = {
     "Дивиденд 2": "3201",
     "Дивиденд 3": "3202",
 }
-EXPENSE_PARENT_ACCOUNT_NUMBER = "5200"
 
 
 def is_dividend_party_type(party_type):
@@ -297,8 +296,9 @@ class Kassa(Document):
         if not self.expense_account:
             frappe.throw(_("Пожалуйста, выберите счет расходов"))
 
-        # Expense Cost Center dan cost_center olish
-        cost_center = frappe.db.get_value(
+        # Foydalanuvchi tanlagan cost_center ustuvor, bo'lmasa Expense Cost Center
+        # mappingidan (agar sozlangan bo'lsa) olib qo'yiladi.
+        cost_center = self.cost_center or frappe.db.get_value(
             "Expense Cost Center",
             {"expense_account": self.expense_account},
             "cost_center"
@@ -522,14 +522,19 @@ class Kassa(Document):
                 if not self.expense_account:
                     frappe.throw(_("Пожалуйста, выберите счет расходов"))
                 validate_expense_account(self.expense_account, self.company)
+                if not self.cost_center:
+                    frappe.throw(_("Пожалуйста, выберите центр затрат"))
+                validate_cost_center(self.cost_center, self.company)
                 self.party = None
             elif is_dividend_party_type(self.party_type):
                 self.party = None
                 self.expense_account = None
+                self.cost_center = None
             else:
                 if not self.party:
                     frappe.throw(_("Пожалуйста, выберите контрагента"))
                 self.expense_account = None
+                self.cost_center = None
 
     def validate_transfer(self):
         """Transfer validatsiyasi"""
@@ -827,11 +832,9 @@ def get_account_balance(account, company):
 
 @frappe.whitelist()
 def get_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
-    """5200 accounti ichidagi expense accountlarni olish."""
+    """Kompaniyaning barcha leaf (guruh bo'lmagan) Expense hisoblarini olish."""
     company = (filters or {}).get("company")
-    parent_account = get_expense_parent_account(company)
-
-    if not parent_account:
+    if not company:
         return []
 
     return frappe.db.sql("""
@@ -840,80 +843,60 @@ def get_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
         WHERE company = %(company)s
         AND root_type = 'Expense'
         AND is_group = 0
-        AND lft > %(parent_lft)s
-        AND rgt < %(parent_rgt)s
         AND (name LIKE %(txt)s OR account_name LIKE %(txt)s)
         ORDER BY name
         LIMIT %(start)s, %(page_len)s
     """, {
         "company": company,
-        "parent_lft": parent_account.lft,
-        "parent_rgt": parent_account.rgt,
         "txt": f"%{txt}%",
         "start": start,
         "page_len": page_len
     })
 
 
-def get_expense_parent_account(company):
-    """5200 parent accountni company bo'yicha topish."""
-    if not company:
-        return None
-
-    accounts = frappe.db.sql(
-        """
-        SELECT name, lft, rgt
-        FROM `tabAccount`
-        WHERE company = %(company)s
-        AND (
-            account_number = %(account_number)s
-            OR name LIKE %(name_pattern)s
-        )
-        ORDER BY
-            CASE WHEN account_number = %(account_number)s THEN 0 ELSE 1 END,
-            is_group DESC,
-            name
-        LIMIT 1
-        """,
-        {
-            "company": company,
-            "account_number": EXPENSE_PARENT_ACCOUNT_NUMBER,
-            "name_pattern": f"{EXPENSE_PARENT_ACCOUNT_NUMBER}%",
-        },
-        as_dict=True,
-    )
-
-    return accounts[0] if accounts else None
-
-
 def validate_expense_account(expense_account, company):
-    """Expense account 5200 ichidagi leaf account ekanini tekshirish."""
-    parent_account = get_expense_parent_account(company)
+    """
+    Xarajat hisobi shu kompaniyaga tegishli, Expense turida va guruh
+    (group) bo'lmagan (leaf) hisob ekanini tekshiradi.
 
-    if not parent_account:
-        frappe.throw(_("Не найден счет расходов {0} для компании {1}").format(
-            EXPENSE_PARENT_ACCOUNT_NUMBER,
-            company,
-        ))
-
+    Ilgari bu hisob qat'iy ravishda raqamlangan bitta umbrella hisob
+    (masalan Pokiza'dagi "5200") ostida bo'lishi shart edi -- bu talab
+    olib tashlandi, chunki barcha biznes standart (raqamsiz) hisoblar
+    rejasidan foydalanmaydi.
+    """
     account = frappe.db.get_value(
         "Account",
         expense_account,
-        ["company", "root_type", "is_group", "lft", "rgt"],
+        ["company", "root_type", "is_group"],
         as_dict=True,
     )
 
-    if (
-        not account
-        or account.company != company
-        or account.root_type != "Expense"
-        or cint(account.is_group)
-        or account.lft <= parent_account.lft
-        or account.rgt >= parent_account.rgt
-    ):
-        frappe.throw(_("Счет расходов должен быть внутри счета {0}").format(
-            parent_account.name
+    if not account or account.company != company:
+        frappe.throw(_("Счет расходов {0} не относится к компании {1}").format(
+            expense_account, company
         ))
+
+    if account.root_type != "Expense":
+        frappe.throw(_("Счет расходов должен быть типа Expense: {0}").format(expense_account))
+
+    if cint(account.is_group):
+        frappe.throw(_("Нельзя выбрать групповой счет расходов: {0}").format(expense_account))
+
+
+def validate_cost_center(cost_center, company):
+    """Cost center tanlangan kompaniyaga tegishli va leaf (guruh emas) ekanini tekshirish."""
+    center = frappe.db.get_value(
+        "Cost Center",
+        cost_center,
+        ["company", "is_group"],
+        as_dict=True,
+    )
+
+    if not center or center.company != company:
+        frappe.throw(_("Центр затрат {0} не относится к компании {1}").format(cost_center, company))
+
+    if cint(center.is_group):
+        frappe.throw(_("Нельзя выбрать групповой центр затрат {0}").format(cost_center))
 
 
 @frappe.whitelist()
