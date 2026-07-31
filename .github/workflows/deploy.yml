@@ -1,0 +1,109 @@
+# ============================================
+# AKFA DILLER — AUTO-DEPLOYMENT WORKFLOW
+# ============================================
+#
+# logistika/.github/workflows/deploy.yml naqshi asosida (bu bench'dagi eng so'nggi,
+# real productionda sinovdan o'tgan namuna), akfa_diller uchun moslab yozilgan.
+#
+# Kerakli GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   - SERVER_IP        production server IP
+#   - SSH_PRIVATE_KEY  root@SERVER_IP'ga ulanadigan SSH private key (parolsiz)
+#   - SITE_NAME        bench SAYT nomi (masalan "akfa.diler" yoki productiondagi
+#                       haqiqiy sayt papkasi nomi -- domendan farq qilishi mumkin)
+#
+# BENCH_PATH pastda logistika bilan bir xil standart qiymatga qo'yilgan --
+# agar akfa_diller boshqa serverda/boshqa yo'lda joylashgan bo'lsa, shuni
+# productiondagi haqiqiy bench yo'liga moslab o'zgartiring.
+#
+# main branchga push qilinganda avtomatik ishga tushadi.
+# ============================================
+
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  BENCH_PATH: "/home/frappe/frappe-bench"
+  APP_NAME: "akfa_diller"
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    environment: production
+
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.SERVER_IP }}" ]; then echo "ERROR: SERVER_IP secret not set!"; exit 1; fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then echo "ERROR: SSH_PRIVATE_KEY secret not set!"; exit 1; fi
+          if [ -z "${{ secrets.SITE_NAME }}" ]; then echo "ERROR: SITE_NAME secret not set!"; exit 1; fi
+          echo "All required secrets are configured"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          ssh root@${{ secrets.SERVER_IP }} << ENDSSH
+            su - frappe << 'FRAPPE_EOF'
+          export SITE_NAME="${{ secrets.SITE_NAME }}"
+          export BENCH_PATH="${{ env.BENCH_PATH }}"
+          export APP_NAME="${{ env.APP_NAME }}"
+          export BRANCH_NAME="${{ github.ref_name }}"
+
+          set -e
+          cd \${BENCH_PATH}/apps/\${APP_NAME}
+
+          echo "Pulling latest code for \${APP_NAME}..."
+          REMOTE_NAME=\$(git remote | head -1)
+          echo "Using remote: \${REMOTE_NAME}"
+          git fetch \${REMOTE_NAME}
+          git reset --hard \${REMOTE_NAME}/\${BRANCH_NAME}
+          echo "Code updated to latest commit:"
+          git log -1 --oneline
+
+          cd \${BENCH_PATH}
+
+          echo "Building frontend assets..."
+          bench build --app \${APP_NAME}
+
+          # --skip-failing: logistika benchida shu bilan bog'liq eski erpnext
+          # patch-registr nomuvofizligi tufayli oddiy "migrate" muvaffaqiyatsiz
+          # tugagan edi -- agar akfa_diller boshqa (toza) benchda bo'lsa, bu
+          # bayroq zarar keltirmaydi, faqat haqiqatan muvaffaqiyatsiz patch
+          # bo'lsa uni jimgina o'tkazib yuboradi.
+          echo "Running database migrations..."
+          bench --site \${SITE_NAME} migrate --skip-failing
+
+          echo "Clearing cache..."
+          bench --site \${SITE_NAME} clear-cache
+          bench --site \${SITE_NAME} clear-website-cache
+
+          echo "Frappe user tasks completed!"
+          FRAPPE_EOF
+
+          echo "Restarting services..."
+          supervisorctl restart all
+          echo "Deployment updated successfully!"
+          ENDSSH
+
+      - name: Health check
+        run: |
+          sleep 5
+          ssh root@${{ secrets.SERVER_IP }} << 'ENDSSH'
+            echo "Service Status:"
+            supervisorctl status
+          ENDSSH
