@@ -156,23 +156,11 @@ after_migrate = ["akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_c
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"akfa_diller.tasks.all"
-# 	],
-# 	"daily": [
-# 		"akfa_diller.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"akfa_diller.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"akfa_diller.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"akfa_diller.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"cron": {
+		"*/5 * * * *": ["akfa_diller.akfa_diller.api.report_service_sync.sync_report_service"],
+	},
+}
 
 # Testing
 # -------

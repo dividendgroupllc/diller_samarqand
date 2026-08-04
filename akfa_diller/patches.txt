@@ -4,9 +4,12 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+
 akfa_diller.patches.oyna_sex_sales_order_setup
 akfa_diller.patches.oyna_sex_list_setup
 akfa_diller.patches.oyna_sex_list_columns
 akfa_diller.patches.backfill_custom_report_roles
 akfa_diller.patches.oyna_sex_manager_company_permission
 akfa_diller.patches.seed_company_group_setup
+akfa_diller.patches.v0_0.add_report_service_custom_fields
+akfa_diller.patches.v0_0.add_report_service_client_cid_unique

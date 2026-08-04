@@ -17,6 +17,16 @@ class InvoiceConfig:
     cost_center: str = ""
     posting_time: str = "23:59:59"
     update_stock: bool = True
+    # When True, builds a Sales Return (is_return=1) instead of a normal invoice --
+    # caller is responsible for passing already-negated qty in `items` (ERPNext
+    # return-stock-back-in behavior relies on the negative sign, not this flag alone).
+    is_return: bool = False
+    # Optional dedup tag (e.g. Report Service's custom_report_service_cid), set on
+    # the doc BEFORE insert()/submit() rather than via a separate call afterward --
+    # otherwise a failure between submit() and that separate call would leave a
+    # fully-posted, untagged document invisible to future dedup checks.
+    external_ref_field: str = ""
+    external_ref_value: str = ""
 
 
 class InvoiceService:
@@ -69,10 +79,14 @@ class InvoiceService:
 
             si.update_stock = 1 if config.update_stock else 0
             si.set_warehouse = config.warehouse
+            if config.is_return:
+                si.is_return = 1
             # Also stamp the doc-level "Accounting Dimensions" cost_center, not
             # just each item row -- otherwise that section shows blank even
             # though every GL entry is correctly cost-centered underneath.
             si.cost_center = config.cost_center
+            if config.external_ref_field:
+                si.set(config.external_ref_field, config.external_ref_value)
 
             for (item_code, rate), qty in consolidated.items():
                 si.append("items", {

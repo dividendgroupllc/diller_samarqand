@@ -84,10 +84,15 @@ def validate_items_exist(items: List[Dict]) -> Dict:
             if not item_code:
                 item_code = frappe.db.get_value("Item", {"item_name": original_name}, "name")
 
-            # 3. Try partial match if still not found
+            # 3. Try partial match if still not found -- order by closest name
+            # length so this is deterministic (the shortest superset of
+            # original_name is the most likely correct match) rather than
+            # whichever row the DB happens to return first among several
+            # substring collisions.
             if not item_code:
                 item_code = frappe.db.get_value(
-                    "Item", {"item_name": ["like", f"%{original_name}%"]}, "name"
+                    "Item", {"item_name": ["like", f"%{original_name}%"]}, "name",
+                    order_by="length(item_name) asc",
                 )
 
             item_cache[original_name] = item_code

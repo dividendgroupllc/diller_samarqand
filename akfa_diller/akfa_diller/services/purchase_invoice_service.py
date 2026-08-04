@@ -17,6 +17,11 @@ class PurchaseInvoiceConfig:
     cost_center: str = ""
     posting_time: str = "23:59:59"
     update_stock: bool = True
+    # Optional dedup tag, set on the doc BEFORE insert()/submit() -- see
+    # InvoiceConfig's external_ref_field for why this can't be a separate call
+    # made after the document is already posted.
+    external_ref_field: str = ""
+    external_ref_value: str = ""
 
 
 class PurchaseInvoiceService:
@@ -78,6 +83,8 @@ class PurchaseInvoiceService:
             # just each item row -- otherwise that section shows blank even
             # though every GL entry is correctly cost-centered underneath.
             pi.cost_center = config.cost_center
+            if config.external_ref_field:
+                pi.set(config.external_ref_field, config.external_ref_value)
 
             for (item_code, rate), qty in consolidated.items():
                 pi.append("items", {
