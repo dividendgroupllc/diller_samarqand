@@ -141,8 +141,14 @@ doctype_list_js = {"Sales Order": "public/js/sales_order_list.js"}
 doc_events = {
 	"Sales Order": {
 		"on_submit": "akfa_diller.akfa_diller.api.oyna_order.on_sales_order_submit",
-	}
+	},
+	"Report": {
+		"validate": "akfa_diller.akfa_diller.api.report_roles.ensure_report_roles",
+	},
 }
+
+# Guarantee standard roles on all custom reports after every migrate/deploy.
+after_migrate = ["akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_custom_reports"]
 
 # Scheduled Tasks
 # ---------------
