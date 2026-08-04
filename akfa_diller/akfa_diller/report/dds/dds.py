@@ -5,6 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from akfa_diller.akfa_diller.api.report_utils import get_effective_company
+
 
 CATEGORY_MAP = {
     "Покупатели": "customer",
@@ -164,6 +166,12 @@ def get_cash_accounts(filters):
     conditions = {}
     if filters.get("mode_of_payment"):
         conditions["parent"] = filters["mode_of_payment"]
+
+    # Company scope (honours per-user Company restriction). Cash accounts are
+    # company-specific, so this scopes the whole report.
+    company = get_effective_company(filters)
+    if company:
+        conditions["company"] = company
 
     accounts = frappe.get_all(
         "Mode of Payment Account",

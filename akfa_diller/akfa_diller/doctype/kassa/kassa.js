@@ -34,6 +34,24 @@ frappe.ui.form.on("Kassa", {
             };
         });
 
+        // Party query — kompaniya guruhlari bo'yicha (Company Group Setup):
+        // Customer -> customer group(lar)i; Supplier -> supplier group(lar)i.
+        frm.set_query("party", function() {
+            if (frm.doc.party_type === "Customer") {
+                return {
+                    query: "akfa_diller.akfa_diller.api.company_groups.company_customers",
+                    filters: { company: frm.doc.company }
+                };
+            }
+            if (frm.doc.party_type === "Supplier") {
+                return {
+                    query: "akfa_diller.akfa_diller.api.company_groups.company_suppliers",
+                    filters: { company: frm.doc.company }
+                };
+            }
+            return {};
+        });
+
         // Set mode_of_payment query
         frm.trigger("set_mode_of_payment_query");
 

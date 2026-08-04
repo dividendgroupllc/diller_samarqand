@@ -5,6 +5,14 @@ import os
 import frappe
 from frappe.utils import flt
 
+from akfa_diller.akfa_diller.api.report_utils import get_effective_company
+
+# Company clause: no-op when company == "" and filters otherwise (uniform 2 params).
+_CC = " AND (%s = '' OR company = %s)"          # unaliased GL Entry
+_CCG = " AND (%s = '' OR ge.company = %s)"       # GL Entry aliased as `ge`
+_CCGL = " AND (%s = '' OR gl.company = %s)"      # GL Entry aliased as `gl`
+
+
 def execute(filters=None):
     if not filters:
         return [], []
@@ -71,16 +79,19 @@ def get_data(filters):
     party_type = filters.get("party_type")
     party = filters.get("party")
 
+    # Effective company (honours per-user Company restriction). "" = all companies.
+    company = get_effective_company(filters) or ""
+
     # Party ning asosiy valyutasini aniqlash (birinchi tranzaksiya valyutasidan)
-    party_currency = frappe.db.sql("""
+    party_currency = frappe.db.sql(f"""
         SELECT account_currency
         FROM `tabGL Entry`
         WHERE party_type = %s
           AND party = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
         ORDER BY posting_date ASC, creation ASC
         LIMIT 1
-    """, (party_type, party))
+    """, (party_type, party, company, company))
 
     party_currency = party_currency[0][0] if party_currency else 'UZS'
 
@@ -89,7 +100,7 @@ def get_data(filters):
     # Formula: PI net - SI net + PE receive - PE pay + JE credit - JE debit + Opening credit - Opening debit + Salary
 
     # Purchase Invoice (PI) - credit qarzni oshiradi, debit return qarzni kamaytiradi
-    opening_pi = frappe.db.sql("""
+    opening_pi = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency - debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -97,11 +108,11 @@ def get_data(filters):
           AND party = %s
           AND voucher_type = 'Purchase Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, party_type, party, party_currency))[0][0]
+          AND is_cancelled = 0{_CC}
+    """, (from_date, party_type, party, party_currency, company, company))[0][0]
 
     # Sales Invoice (SI) - debit ular qarzini oshiradi, credit return qarzni kamaytiradi
-    opening_si = frappe.db.sql("""
+    opening_si = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency - credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -109,11 +120,11 @@ def get_data(filters):
           AND party = %s
           AND voucher_type = 'Sales Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, party_type, party, party_currency))[0][0]
+          AND is_cancelled = 0{_CC}
+    """, (from_date, party_type, party, party_currency, company, company))[0][0]
 
     # Payment Entry Receive - credit (biz pul oldik)
-    opening_pe_receive = frappe.db.sql("""
+    opening_pe_receive = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.credit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -123,11 +134,11 @@ def get_data(filters):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Receive'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, party_currency))[0][0]
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, party_currency, company, company))[0][0]
 
     # Payment Entry Pay - debit (biz pul to'ladik)
-    opening_pe_pay = frappe.db.sql("""
+    opening_pe_pay = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.debit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -137,11 +148,11 @@ def get_data(filters):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Pay'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, party_currency))[0][0]
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, party_currency, company, company))[0][0]
 
     # Journal Entry (JE) credit va debit - opening entry emas
-    opening_je = frappe.db.sql("""
+    opening_je = frappe.db.sql(f"""
         SELECT
             IFNULL(SUM(ge.credit_in_account_currency), 0) as je_credit,
             IFNULL(SUM(ge.debit_in_account_currency), 0) as je_debit
@@ -153,14 +164,14 @@ def get_data(filters):
           AND ge.voucher_type = 'Journal Entry'
           AND je.is_opening = 'No'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, party_currency), as_dict=True)[0]
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, party_currency, company, company), as_dict=True)[0]
 
     opening_je_credit = opening_je.get('je_credit', 0)
     opening_je_debit = opening_je.get('je_debit', 0)
 
     # Opening Entry credit va debit
-    opening_entry = frappe.db.sql("""
+    opening_entry = frappe.db.sql(f"""
         SELECT
             IFNULL(SUM(ge.credit_in_account_currency), 0) as op_credit,
             IFNULL(SUM(ge.debit_in_account_currency), 0) as op_debit
@@ -172,8 +183,8 @@ def get_data(filters):
           AND ge.voucher_type = 'Journal Entry'
           AND je.is_opening = 'Yes'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, party_currency), as_dict=True)[0]
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, party_currency, company, company), as_dict=True)[0]
 
     opening_op_credit = opening_entry.get('op_credit', 0)
     opening_op_debit = opening_entry.get('op_debit', 0)
@@ -181,14 +192,14 @@ def get_data(filters):
     # Salary Slip'lardan (faqat Employee uchun)
     opening_salary = 0
     if party_type == "Employee":
-        opening_salary = frappe.db.sql("""
+        opening_salary = frappe.db.sql(f"""
             SELECT
                 IFNULL(SUM(gross_pay), 0)
             FROM `tabSalary Slip`
             WHERE posting_date < %s
               AND employee = %s
-              AND docstatus = 1
-        """, (from_date, party))[0][0]
+              AND docstatus = 1{_CC}
+        """, (from_date, party, company, company))[0][0]
 
     # Formula: PI - SI + PE receive - PE pay + JE credit - JE debit + OP credit - OP debit + Salary
     opening_balance = (
@@ -220,7 +231,7 @@ def get_data(filters):
     })
 
     # GL Entry'larni olish - faqat party valyutasida, cancelled'larni olib tashlash
-    gl_entries = frappe.db.sql("""
+    gl_entries = frappe.db.sql(f"""
         SELECT
             gl.posting_date,
             gl.voucher_type,
@@ -233,15 +244,15 @@ def get_data(filters):
           AND gl.party_type = %s
           AND gl.party = %s
           AND gl.account_currency = %s
-          AND gl.is_cancelled = 0
+          AND gl.is_cancelled = 0{_CCGL}
         ORDER BY gl.posting_date ASC, gl.creation ASC
-    """, (from_date, to_date, party_type, party, party_currency), as_dict=True)
+    """, (from_date, to_date, party_type, party, party_currency, company, company), as_dict=True)
 
     # Salary Slip'larni olish (Employee uchun)
     salary_slips = []
     if party_type == "Employee":
-        salary_slips = frappe.db.sql("""
-            SELECT 
+        salary_slips = frappe.db.sql(f"""
+            SELECT
                 posting_date,
                 name as voucher_no,
                 employee_name,
@@ -251,9 +262,9 @@ def get_data(filters):
             FROM `tabSalary Slip`
             WHERE posting_date BETWEEN %s AND %s
               AND employee = %s
-              AND docstatus = 1
+              AND docstatus = 1{_CC}
             ORDER BY posting_date ASC
-        """, (from_date, to_date, party), as_dict=True)
+        """, (from_date, to_date, party, company, company), as_dict=True)
         
         # Salary Slip'larni GL entries bilan birlashtirish
         for ss in salary_slips:
@@ -676,7 +687,8 @@ def generate_akt_sverka_pdf(filters):
     data = get_data(filters)
 
     company = (
-        frappe.defaults.get_user_default("Company")
+        get_effective_company(filters)
+        or frappe.defaults.get_user_default("Company")
         or frappe.db.get_single_value("Global Defaults", "default_company")
         or ""
     )
