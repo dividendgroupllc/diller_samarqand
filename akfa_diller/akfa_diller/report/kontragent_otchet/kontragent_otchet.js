@@ -15,6 +15,13 @@ frappe.query_reports["Kontragent Otchet"] = {
             "reqd": 1
         },
         {
+            "fieldname": "company",
+            "label": __("Компания"),
+            "fieldtype": "Link",
+            "options": "Company",
+            "default": frappe.defaults.get_user_default("Company")
+        },
+        {
             "fieldname": "party_type",
             "label": __("Контрагент тури"),
             "fieldtype": "Select",

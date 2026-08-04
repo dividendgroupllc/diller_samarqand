@@ -8,3 +8,4 @@ akfa_diller.patches.oyna_sex_sales_order_setup
 akfa_diller.patches.oyna_sex_list_setup
 akfa_diller.patches.oyna_sex_list_columns
 akfa_diller.patches.backfill_custom_report_roles
+akfa_diller.patches.oyna_sex_manager_company_permission

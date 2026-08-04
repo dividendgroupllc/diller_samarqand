@@ -1,6 +1,14 @@
 import frappe
 from frappe.utils import flt
 
+from akfa_diller.akfa_diller.api.report_utils import get_effective_company
+
+# Company clause that is a no-op when company == "" and filters otherwise.
+# Kept uniform (always 2 params) so every query has a constant param shape.
+_CC = " AND (%s = '' OR company = %s)"          # unaliased GL Entry
+_CCG = " AND (%s = '' OR ge.company = %s)"       # GL Entry aliased as `ge`
+
+
 def execute(filters=None):
     if not filters:
         return [], []
@@ -79,8 +87,11 @@ def get_data(filters):
     party = filters.get("party")
     currency_filter = filters.get("currency")
 
+    # Effective company (honours per-user Company restriction). "" = all companies.
+    company = get_effective_company(filters) or ""
+
     # Get list of parties (without currency filter in query)
-    parties = get_parties(party_type, party)
+    parties = get_parties(party_type, party, company)
 
     data = []
 
@@ -101,7 +112,7 @@ def get_data(filters):
     }
 
     for party_info in parties:
-        row = calculate_party_balances(party_info, from_date, to_date)
+        row = calculate_party_balances(party_info, from_date, to_date, company)
         if row:
             # Filter by party's default currency if currency filter is set
             if currency_filter and row.get("currency") != currency_filter:
@@ -128,8 +139,8 @@ def get_data(filters):
     return data
 
 
-def get_parties(party_type=None, party=None):
-    """Get list of parties based on filters"""
+def get_parties(party_type=None, party=None, company=""):
+    """Get list of parties based on filters (scoped to company when set)."""
     conditions = ["party IS NOT NULL", "party != ''", "party_type IS NOT NULL", "party_type != ''"]
     values = []
 
@@ -141,6 +152,10 @@ def get_parties(party_type=None, party=None):
     if party_type:
         conditions.append("party_type = %s")
         values.append(party_type)
+
+    # Company scope (no-op when company == "")
+    conditions.append("(%s = '' OR company = %s)")
+    values.extend([company, company])
 
     where_clause = "WHERE " + " AND ".join(conditions)
 
@@ -155,8 +170,8 @@ def get_parties(party_type=None, party=None):
     return result
 
 
-def calculate_party_balances(party_info, from_date, to_date):
-    """Calculate all balances for a party"""
+def calculate_party_balances(party_info, from_date, to_date, company=""):
+    """Calculate all balances for a party (scoped to company when set)."""
     party_type = party_info.get("party_type")
     party = party_info.get("party")
 
@@ -164,12 +179,12 @@ def calculate_party_balances(party_info, from_date, to_date):
     currency = get_party_currency(party_type, party)
 
     # Calculate opening balances (before from_date)
-    opening_uzs = calculate_opening_balance(party_type, party, from_date, "UZS")
-    opening_usd = calculate_opening_balance(party_type, party, from_date, "USD")
+    opening_uzs = calculate_opening_balance(party_type, party, from_date, "UZS", company)
+    opening_usd = calculate_opening_balance(party_type, party, from_date, "USD", company)
 
     # Calculate period balances (from_date to to_date)
-    period_uzs = calculate_period_balance(party_type, party, from_date, to_date, "UZS")
-    period_usd = calculate_period_balance(party_type, party, from_date, to_date, "USD")
+    period_uzs = calculate_period_balance(party_type, party, from_date, to_date, "UZS", company)
+    period_usd = calculate_period_balance(party_type, party, from_date, to_date, "USD", company)
 
     # Calculate final balances
     final_uzs_net = (opening_uzs['credit'] - opening_uzs['debit']) + (period_uzs['credit'] - period_uzs['debit'])
@@ -224,9 +239,9 @@ def get_party_currency(party_type, party):
     return currency or "UZS"
 
 
-def calculate_opening_balance(party_type, party, from_date, currency):
+def calculate_opening_balance(party_type, party, from_date, currency, company=""):
     """
-    Calculate opening balance before from_date for a specific currency
+    Calculate opening balance before from_date for a specific currency (company-scoped).
 
     Credit calculation:
     + Journal Entry (Opening Entry) Credit
@@ -243,7 +258,7 @@ def calculate_opening_balance(party_type, party, from_date, currency):
     """
 
     # Journal Entry Opening Entry Credit
-    je_opening_credit = frappe.db.sql("""
+    je_opening_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -251,15 +266,15 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Opening Entry'
           )
-    """, (from_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Journal Entry Journal Entry Credit
-    je_journal_credit = frappe.db.sql("""
+    je_journal_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -267,15 +282,15 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Journal Entry'
           )
-    """, (from_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Purchase Invoice
-    pi_credit = frappe.db.sql("""
+    pi_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -283,11 +298,11 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Purchase Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, party_type, party, currency))[0][0] or 0
+          AND is_cancelled = 0{_CC}
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Payment Entry Receive
-    pe_receive_credit = frappe.db.sql("""
+    pe_receive_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.credit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -297,13 +312,13 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Receive'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, currency))[0][0] or 0
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Salary Slip (only for UZS)
     salary_credit = 0
     if currency == "UZS":
-        salary_credit = frappe.db.sql("""
+        salary_credit = frappe.db.sql(f"""
             SELECT IFNULL(SUM(credit_in_account_currency), 0)
             FROM `tabGL Entry`
             WHERE posting_date < %s
@@ -311,14 +326,14 @@ def calculate_opening_balance(party_type, party, from_date, currency):
               AND party = %s
               AND voucher_type = 'Salary Slip'
               AND account_currency = 'UZS'
-              AND is_cancelled = 0
-        """, (from_date, party_type, party))[0][0] or 0
+              AND is_cancelled = 0{_CC}
+        """, (from_date, party_type, party, company, company))[0][0] or 0
 
     total_credit = je_opening_credit + je_journal_credit + pi_credit + pe_receive_credit + salary_credit
 
     # Debit calculations
     # Journal Entry Opening Entry Debit
-    je_opening_debit = frappe.db.sql("""
+    je_opening_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -326,15 +341,15 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Opening Entry'
           )
-    """, (from_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Journal Entry Journal Entry Debit
-    je_journal_debit = frappe.db.sql("""
+    je_journal_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -342,15 +357,15 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Journal Entry'
           )
-    """, (from_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Sales Invoice
-    si_debit = frappe.db.sql("""
+    si_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date < %s
@@ -358,11 +373,11 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND party = %s
           AND voucher_type = 'Sales Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, party_type, party, currency))[0][0] or 0
+          AND is_cancelled = 0{_CC}
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Payment Entry Pay
-    pe_pay_debit = frappe.db.sql("""
+    pe_pay_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.debit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -372,8 +387,8 @@ def calculate_opening_balance(party_type, party, from_date, currency):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Pay'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, party_type, party, currency))[0][0] or 0
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, party_type, party, currency, company, company))[0][0] or 0
 
     total_debit = je_opening_debit + je_journal_debit + si_debit + pe_pay_debit
 
@@ -386,9 +401,9 @@ def calculate_opening_balance(party_type, party, from_date, currency):
         return {"credit": 0, "debit": abs(net)}
 
 
-def calculate_period_balance(party_type, party, from_date, to_date, currency):
+def calculate_period_balance(party_type, party, from_date, to_date, currency, company=""):
     """
-    Calculate period balance from from_date to to_date for a specific currency
+    Calculate period balance from from_date to to_date for a specific currency (company-scoped).
 
     Credit calculation:
     + Opening Entry Credit
@@ -405,7 +420,7 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
     """
 
     # Opening Entry Credit
-    opening_credit = frappe.db.sql("""
+    opening_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -414,15 +429,15 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Opening Entry'
           )
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Journal Entry Credit
-    je_credit = frappe.db.sql("""
+    je_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -431,15 +446,15 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Journal Entry'
           )
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Purchase Invoice Credit
-    pi_credit = frappe.db.sql("""
+    pi_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(credit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -448,11 +463,11 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Purchase Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+          AND is_cancelled = 0{_CC}
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Payment Entry Receive Credit
-    pe_receive_credit = frappe.db.sql("""
+    pe_receive_credit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.credit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -463,13 +478,13 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Receive'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Salary Slip (only for UZS)
     salary_credit = 0
     if currency == "UZS":
-        salary_credit = frappe.db.sql("""
+        salary_credit = frappe.db.sql(f"""
             SELECT IFNULL(SUM(credit_in_account_currency), 0)
             FROM `tabGL Entry`
             WHERE posting_date >= %s
@@ -478,14 +493,14 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
               AND party = %s
               AND voucher_type = 'Salary Slip'
               AND account_currency = 'UZS'
-              AND is_cancelled = 0
-        """, (from_date, to_date, party_type, party))[0][0] or 0
+              AND is_cancelled = 0{_CC}
+        """, (from_date, to_date, party_type, party, company, company))[0][0] or 0
 
     total_credit = opening_credit + je_credit + pi_credit + pe_receive_credit + salary_credit
 
     # Debit calculations
     # Opening Entry Debit
-    opening_debit = frappe.db.sql("""
+    opening_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -494,15 +509,15 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Opening Entry'
           )
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Journal Entry Debit
-    je_debit = frappe.db.sql("""
+    je_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -511,15 +526,15 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Journal Entry'
           AND account_currency = %s
-          AND is_cancelled = 0
+          AND is_cancelled = 0{_CC}
           AND voucher_no IN (
               SELECT name FROM `tabJournal Entry`
               WHERE voucher_type = 'Journal Entry'
           )
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Payment Entry Pay Debit
-    pe_pay_debit = frappe.db.sql("""
+    pe_pay_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(ge.debit_in_account_currency), 0)
         FROM `tabGL Entry` ge
         INNER JOIN `tabPayment Entry` pe ON ge.voucher_no = pe.name
@@ -530,11 +545,11 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND ge.voucher_type = 'Payment Entry'
           AND pe.payment_type = 'Pay'
           AND ge.account_currency = %s
-          AND ge.is_cancelled = 0
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+          AND ge.is_cancelled = 0{_CCG}
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     # Sales Invoice Debit
-    si_debit = frappe.db.sql("""
+    si_debit = frappe.db.sql(f"""
         SELECT IFNULL(SUM(debit_in_account_currency), 0)
         FROM `tabGL Entry`
         WHERE posting_date >= %s
@@ -543,8 +558,8 @@ def calculate_period_balance(party_type, party, from_date, to_date, currency):
           AND party = %s
           AND voucher_type = 'Sales Invoice'
           AND account_currency = %s
-          AND is_cancelled = 0
-    """, (from_date, to_date, party_type, party, currency))[0][0] or 0
+          AND is_cancelled = 0{_CC}
+    """, (from_date, to_date, party_type, party, currency, company, company))[0][0] or 0
 
     total_debit = opening_debit + je_debit + pe_pay_debit + si_debit
 
