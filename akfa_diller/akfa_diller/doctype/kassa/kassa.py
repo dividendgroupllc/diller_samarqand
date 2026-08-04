@@ -522,6 +522,17 @@ class Kassa(Document):
                 if not self.expense_account:
                     frappe.throw(_("Пожалуйста, выберите счет расходов"))
                 validate_expense_account(self.expense_account, self.company)
+                # cost_center ba'zi userlarda yashirin bo'lishi mumkin — bo'sh bo'lsa
+                # Expense Cost Center mappingidan, bo'lmasa kompaniya default'idan olamiz.
+                if not self.cost_center:
+                    self.cost_center = (
+                        frappe.db.get_value(
+                            "Expense Cost Center",
+                            {"expense_account": self.expense_account},
+                            "cost_center",
+                        )
+                        or frappe.get_cached_value("Company", self.company, "cost_center")
+                    )
                 if not self.cost_center:
                     frappe.throw(_("Пожалуйста, выберите центр затрат"))
                 validate_cost_center(self.cost_center, self.company)

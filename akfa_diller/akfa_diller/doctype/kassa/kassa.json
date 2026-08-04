@@ -206,7 +206,7 @@
    "fieldname": "party_type",
    "fieldtype": "Select",
    "label": "Тип контрагента",
-   "options": "\nCustomer\nSupplier\nShareholder\nEmployee\nДивиденд 1\nДивиденд 2\nДивиденд 3\nРасходы"
+   "options": "\nCustomer\nSupplier\nShareholder\nEmployee\nДивиденд 1\nРасходы"
   },
   {
    "depends_on": "eval:doc.party_type && doc.party_type !== 'Расходы' && !in_list(['Дивиденд', 'Дивиденд 1', 'Дивиденд 2', 'Дивиденд 3'], doc.party_type)",

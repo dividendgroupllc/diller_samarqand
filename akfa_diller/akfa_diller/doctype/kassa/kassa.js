@@ -14,6 +14,22 @@ frappe.ui.form.on("Kassa", {
         frm._cash_account_to_currency = frm._cash_account_to_currency || "";
         frm.trigger("clear_copied_linked_document");
 
+        // "Центр затрат" (cost center) — kompaniyaga cheklangan userlarda yashiriladi.
+        // Natija user bo'yicha o'zgarmaydi -> bir marta so'rab, cache qilamiz.
+        if (window._akfa_kassa_restricted === undefined) {
+            frappe.call({
+                method: "akfa_diller.akfa_diller.api.report_utils.is_company_restricted_user",
+                callback: function(r) {
+                    window._akfa_kassa_restricted = !!(r && r.message);
+                    if (window._akfa_kassa_restricted) {
+                        frm.set_df_property("cost_center", "hidden", 1);
+                    }
+                }
+            });
+        } else if (window._akfa_kassa_restricted) {
+            frm.set_df_property("cost_center", "hidden", 1);
+        }
+
         // Set expense account query
         frm.set_query("expense_account", function() {
             return {

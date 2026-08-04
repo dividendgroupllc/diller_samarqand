@@ -46,3 +46,11 @@ def get_effective_company(filters):
 		return allowed[0]
 
 	return filter_company or None
+
+
+@frappe.whitelist()
+def is_company_restricted_user():
+	"""True if the current user is restricted to a company (Company User
+	Permission). Used by client scripts to hide fields (e.g. Kassa cost center)
+	for company-scoped managers."""
+	return bool(get_allowed_companies())
