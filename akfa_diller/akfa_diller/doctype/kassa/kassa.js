@@ -21,13 +21,11 @@ frappe.ui.form.on("Kassa", {
                 method: "akfa_diller.akfa_diller.api.report_utils.is_company_restricted_user",
                 callback: function(r) {
                     window._akfa_kassa_restricted = !!(r && r.message);
-                    if (window._akfa_kassa_restricted) {
-                        frm.set_df_property("cost_center", "hidden", 1);
-                    }
+                    apply_cost_center_restriction(frm);
                 }
             });
-        } else if (window._akfa_kassa_restricted) {
-            frm.set_df_property("cost_center", "hidden", 1);
+        } else {
+            apply_cost_center_restriction(frm);
         }
 
         // Set expense account query
@@ -726,6 +724,28 @@ frappe.ui.form.on("Kassa", {
 
 function has_field(frm, fieldname) {
     return Boolean(frm && frm.fields_dict && frm.fields_dict[fieldname]);
+}
+
+// Kompaniyaga cheklangan user (masalan Oyna sex menejeri) uchun "Центр затрат"
+// yashiriladi -- va yashirin maydon MAJBURIY bo'lib qolmasligi kerak.
+//
+// Faqat hidden qilish yetmaydi: save.js'dagi check_mandatory maydonni
+// `mandatory_depends_on` ifodasi bo'yicha qayta hisoblaydi va `hidden`/`reqd`
+// ga umuman qaramaydi -- natijada user ko'rmaydigan, to'ldira olmaydigan
+// maydon tufayli saqlash bloklanardi. Shu sabab ifodaning o'zini ham
+// tozalaymiz.
+//
+// Server tarafda cost_center baribir avtomatik to'ldiriladi (Расходы uchun:
+// Expense Cost Center mappingi -> kompaniyaning default cost center'i), ya'ni
+// GL yozuvlari cost center'siz qolmaydi -- qarang kassa.py validate_party().
+function apply_cost_center_restriction(frm) {
+    if (!window._akfa_kassa_restricted) {
+        return;
+    }
+
+    frm.set_df_property("cost_center", "hidden", 1);
+    frm.set_df_property("cost_center", "mandatory_depends_on", "");
+    frm.set_df_property("cost_center", "reqd", 0);
 }
 
 function set_derived_value(frm, fieldname, value) {
