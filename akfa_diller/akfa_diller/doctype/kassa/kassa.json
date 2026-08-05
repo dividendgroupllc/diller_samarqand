@@ -222,7 +222,7 @@
    "read_only": 1
   },
   {
-   "depends_on": "eval:doc.party && in_list(['Customer', 'Supplier'], doc.party_type)",
+   "depends_on": "eval:doc.party && in_list(['Customer', 'Supplier', 'Employee'], doc.party_type)",
    "fieldname": "party_currency",
    "fieldtype": "Data",
    "label": "Валюта контрагента",

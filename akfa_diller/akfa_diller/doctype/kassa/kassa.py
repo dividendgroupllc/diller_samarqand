@@ -17,6 +17,17 @@ DIVIDEND_ACCOUNT_NUMBERS = {
     "Дивиденд 3": "3202",
 }
 
+# Xodimga to'lov qaysi Payable hisobga yozilishi -- (kompaniya, xodimning maosh
+# valyutasi) bo'yicha. ERPNext'ning standart mantiqi bu yerda to'g'ri kelmaydi:
+# u Company.default_payable_account'ni oladi (Oyna sex'da bu USD'dagi umumiy
+# kreditorlar hisobi), xodim maoshi esa UZS'da.
+#
+# Bu ro'yxatda yo'q (kompaniya, valyuta) juftligi uchun hisob avtomatik
+# aniqlanadi -- qarang get_employee_payable_account().
+EMPLOYEE_PAYABLE_ACCOUNTS = {
+    ("Oyna sex", "UZS"): "Hodimlar uzs - Os",
+}
+
 
 def is_dividend_party_type(party_type):
     return party_type in DIVIDEND_ACCOUNT_NUMBERS
@@ -142,17 +153,10 @@ class Kassa(Document):
             return erpnext_get_party_account(self.party_type, self.party, self.company)
 
         if self.party_type == "Employee":
-            payable_account = frappe.db.get_value(
-                "Account",
-                {
-                    "company": self.company,
-                    "account_type": "Payable",
-                    "is_group": 0,
-                },
-                "name",
-            )
-            if payable_account:
-                return payable_account
+            # Xodim uchun hisob uning MAOSH valyutasi bo'yicha tanlanadi --
+            # kassa valyutasidan qat'i nazar. Kassa boshqa valyutada bo'lsa,
+            # to'lov kurs bo'yicha konvertatsiya qilinadi (multicurrency PE).
+            return get_employee_payable_account(self.party, self.company)
 
         frappe.throw(_("Не удалось определить счет контрагента для {0}").format(self.party_type))
 
@@ -788,6 +792,127 @@ def _format_mode_of_payment_query_result(modes, txt):
     return [[m.mode_of_payment, m.currency] for m in modes]
 
 
+def get_employee_salary_currency(employee, company):
+    """Xodimning maosh valyutasi.
+
+    Tartib:
+      1) Employee.salary_currency ("Salary Currency" maydoni) -- asosiy manba;
+      2) oxirgi tasdiqlangan Salary Structure Assignment valyutasi (HRMS
+         o'rnatilgan bo'lsa);
+      3) kompaniya valyutasi.
+    """
+    if not employee or not company:
+        return frappe.get_cached_value("Company", company, "default_currency") if company else None
+
+    currency = frappe.db.get_value("Employee", employee, "salary_currency")
+    if currency:
+        return currency
+
+    if frappe.db.exists("DocType", "Salary Structure Assignment"):
+        currency = frappe.db.get_value(
+            "Salary Structure Assignment",
+            {"employee": employee, "company": company, "docstatus": 1},
+            "currency",
+            order_by="from_date desc",
+        )
+        if currency:
+            return currency
+
+    return frappe.get_cached_value("Company", company, "default_currency")
+
+
+def validate_employee_payable_account(account, company, currency):
+    """EMPLOYEE_PAYABLE_ACCOUNTS'dagi hisob haqiqatan mos ekanini tekshirish."""
+    info = frappe.db.get_value(
+        "Account",
+        account,
+        ["company", "account_type", "is_group", "account_currency"],
+        as_dict=True,
+    )
+
+    if not info:
+        frappe.throw(
+            _("Счет сотрудников {0} не найден. Создайте его в плане счетов компании {1}.").format(
+                account, company
+            )
+        )
+
+    if info.company != company:
+        frappe.throw(
+            _("Счет сотрудников {0} не относится к компании {1}").format(account, company)
+        )
+
+    if cint(info.is_group):
+        frappe.throw(_("Нельзя использовать групповой счет сотрудников: {0}").format(account))
+
+    if info.account_type != "Payable":
+        frappe.throw(_("Счет сотрудников {0} должен быть типа Payable").format(account))
+
+    if info.account_currency != currency:
+        frappe.throw(
+            _("Валюта счета {0} ({1}) не совпадает с валютой зарплаты сотрудника ({2})").format(
+                account, info.account_currency, currency
+            )
+        )
+
+
+def get_employee_payable_account(employee, company, currency=None):
+    """Xodim uchun Payable hisob -- uning MAOSH valyutasi bo'yicha.
+
+    1) EMPLOYEE_PAYABLE_ACCOUNTS dagi (kompaniya, valyuta) mosligi;
+    2) xodimning shu kompaniya/valyutadagi oldingi yozuvlari hisobi (tarix
+       uzilib qolmasligi uchun);
+    3) kompaniyaning default payable hisobi -- valyutasi mos kelsa;
+    4) shu valyutadagi yagona Payable (leaf) hisob.
+    """
+    currency = currency or get_employee_salary_currency(employee, company)
+
+    mapped = EMPLOYEE_PAYABLE_ACCOUNTS.get((company, currency))
+    if mapped:
+        validate_employee_payable_account(mapped, company, currency)
+        return mapped
+
+    existing = frappe.db.get_value(
+        "GL Entry",
+        {
+            "party_type": "Employee",
+            "party": employee,
+            "company": company,
+            "account_currency": currency,
+            "is_cancelled": 0,
+        },
+        "account",
+        order_by="posting_date desc, creation desc",
+    )
+    if existing:
+        return existing
+
+    default_payable = frappe.get_cached_value("Company", company, "default_payable_account")
+    if (
+        default_payable
+        and frappe.get_cached_value("Account", default_payable, "account_currency") == currency
+    ):
+        return default_payable
+
+    candidates = frappe.get_all(
+        "Account",
+        filters={
+            "company": company,
+            "account_type": "Payable",
+            "is_group": 0,
+            "account_currency": currency,
+        },
+        pluck="name",
+    )
+    if len(candidates) == 1:
+        return candidates[0]
+
+    frappe.throw(
+        _("Не удалось определить счет сотрудника в валюте {0} для компании {1}. "
+          "Настройте счет типа Payable в этой валюте.").format(currency, company)
+    )
+
+
 @frappe.whitelist()
 def get_party_currency(party_type, party, company):
     """Party uchun default currency olish"""
@@ -806,15 +931,10 @@ def get_party_currency(party_type, party, company):
         if not currency:
             currency = frappe.get_cached_value("Company", company, "default_currency")
     elif party_type == "Employee":
-        account = frappe.db.get_value(
-            "Account",
-            {"company": company, "account_type": "Payable", "is_group": 0},
-            "name"
-        )
-        if account:
-            currency = frappe.get_cached_value("Account", account, "account_currency")
-        if not currency:
-            currency = frappe.get_cached_value("Company", company, "default_currency")
+        # Xodim uchun "party valyutasi" = MAOSH valyutasi. Hisob ham shu
+        # valyutada tanlanadi (get_employee_payable_account), shuning uchun
+        # kassa boshqa valyutada bo'lsa multicurrency to'lov ishlab ketadi.
+        currency = get_employee_salary_currency(party, company)
     else:
         currency = frappe.get_cached_value("Company", company, "default_currency")
 

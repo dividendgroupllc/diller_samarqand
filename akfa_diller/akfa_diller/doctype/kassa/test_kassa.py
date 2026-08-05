@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from akfa_diller.akfa_diller.doctype.kassa.kassa import Kassa, get_exchange_rate
+from akfa_diller.akfa_diller.doctype.kassa.kassa import (
+    Kassa,
+    get_employee_payable_account,
+    get_employee_salary_currency,
+    get_exchange_rate,
+)
 
 
 def make_kassa_doc(**overrides):
@@ -422,6 +427,143 @@ class UnitTestKassa(FrappeTestCase):
         self.assertEqual(fake_je.accounts[1].debit_in_account_currency, 11000000)
         self.assertAlmostEqual(fake_je.accounts[0].credit, fake_je.accounts[1].debit)
         self.assertEqual(fake_je.accounts[1].exchange_rate, 0.000081967)
+
+
+    # --- Xodimga to'lov: maosh valyutasi bo'yicha hisob + konvertatsiya ---
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.db.get_value")
+    def test_employee_salary_currency_prefers_employee_field(self, mocked_get_value):
+        mocked_get_value.return_value = "UZS"
+
+        self.assertEqual(get_employee_salary_currency("HR-EMP-0001", "Oyna sex"), "UZS")
+        mocked_get_value.assert_called_once_with("Employee", "HR-EMP-0001", "salary_currency")
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.get_cached_value", return_value="USD")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.db.exists", return_value=False)
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.db.get_value", return_value=None)
+    def test_employee_salary_currency_falls_back_to_company(self, _get_value, _exists, _cached):
+        self.assertEqual(get_employee_salary_currency("HR-EMP-0001", "Oyna sex"), "USD")
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.db.get_value")
+    def test_employee_payable_account_uses_company_currency_mapping(self, mocked_get_value):
+        mocked_get_value.return_value = frappe._dict({
+            "company": "Oyna sex",
+            "account_type": "Payable",
+            "is_group": 0,
+            "account_currency": "UZS",
+        })
+
+        account = get_employee_payable_account("HR-EMP-0001", "Oyna sex", "UZS")
+
+        self.assertEqual(account, "Hodimlar uzs - Os")
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.db.get_value")
+    def test_employee_payable_account_rejects_wrong_currency(self, mocked_get_value):
+        # Mapping'dagi hisob boshqa valyutada bo'lsa -- jimgina ishlatilmasligi kerak.
+        mocked_get_value.return_value = frappe._dict({
+            "company": "Oyna sex",
+            "account_type": "Payable",
+            "is_group": 0,
+            "account_currency": "USD",
+        })
+
+        with self.assertRaises(frappe.ValidationError):
+            get_employee_payable_account("HR-EMP-0001", "Oyna sex", "UZS")
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.msgprint")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.utils.get_link_to_form", return_value="PAYMENT-LINK")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.get_cached_value")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.new_doc")
+    def test_employee_payment_converts_when_cash_currency_differs(
+        self,
+        mocked_new_doc,
+        mocked_get_cached_value,
+        _mocked_link,
+        _mocked_msgprint,
+    ):
+        """Kassa USD, xodim maoshi UZS -> kurs bo'yicha konvertatsiya."""
+        fake_pe = FakePaymentEntry()
+        mocked_new_doc.return_value = fake_pe
+
+        lookup = {
+            ("Account", "Hodimlar uzs - Os", "account_currency"): "UZS",
+            ("Account", "Kassa USD - Os", "account_currency"): "USD",
+        }
+        mocked_get_cached_value.side_effect = lambda doctype, name, fieldname: lookup.get((doctype, name, fieldname))
+
+        doc = make_kassa_doc(
+            transaction_type="Расход",
+            company="Oyna sex",
+            party_type="Employee",
+            party="HR-EMP-0001",
+            party_currency="UZS",
+            cash_account="Kassa USD - Os",
+            cash_account_currency="USD",
+            amount=100,
+            exchange_rate=12500,
+            debit_amount=100,
+            credit_amount=1250000,
+        )
+        doc.get_party_account = MagicMock(return_value="Hodimlar uzs - Os")
+        doc.get_company_exchange_rate = MagicMock(side_effect=lambda currency: 1 if currency == "USD" else 0.00008)
+        doc.set_linked_document = MagicMock()
+        doc.name = "KASSA-TEST-0002"
+
+        doc.create_payment_entry()
+
+        self.assertEqual(fake_pe.payment_type, "Pay")
+        self.assertEqual(fake_pe.paid_from, "Kassa USD - Os")
+        self.assertEqual(fake_pe.paid_to, "Hodimlar uzs - Os")
+        # Kassadan USD chiqadi, xodim hisobiga UZS tushadi.
+        self.assertEqual(fake_pe.paid_amount, 100)
+        self.assertEqual(fake_pe.received_amount, 1250000)
+        self.assertEqual(fake_pe.source_exchange_rate, 1)
+        self.assertEqual(fake_pe.target_exchange_rate, 0.00008)
+
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.msgprint")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.utils.get_link_to_form", return_value="PAYMENT-LINK")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.get_cached_value")
+    @patch("akfa_diller.akfa_diller.doctype.kassa.kassa.frappe.new_doc")
+    def test_employee_payment_without_conversion_when_same_currency(
+        self,
+        mocked_new_doc,
+        mocked_get_cached_value,
+        _mocked_link,
+        _mocked_msgprint,
+    ):
+        """Kassa ham UZS, xodim maoshi ham UZS -> konvertatsiyasiz."""
+        fake_pe = FakePaymentEntry()
+        mocked_new_doc.return_value = fake_pe
+
+        lookup = {
+            ("Account", "Hodimlar uzs - Os", "account_currency"): "UZS",
+            ("Account", "Kassa UZS - Os", "account_currency"): "UZS",
+        }
+        mocked_get_cached_value.side_effect = lambda doctype, name, fieldname: lookup.get((doctype, name, fieldname))
+
+        doc = make_kassa_doc(
+            transaction_type="Расход",
+            company="Oyna sex",
+            party_type="Employee",
+            party="HR-EMP-0001",
+            party_currency="UZS",
+            cash_account="Kassa UZS - Os",
+            cash_account_currency="UZS",
+            amount=1250000,
+            exchange_rate=0,
+            debit_amount=0,
+            credit_amount=0,
+        )
+        doc.get_party_account = MagicMock(return_value="Hodimlar uzs - Os")
+        doc.set_linked_document = MagicMock()
+        doc.name = "KASSA-TEST-0003"
+
+        doc.create_payment_entry()
+
+        self.assertEqual(fake_pe.paid_amount, 1250000)
+        self.assertEqual(fake_pe.received_amount, 1250000)
+        self.assertIsNone(fake_pe.source_exchange_rate)
+        self.assertIsNone(fake_pe.target_exchange_rate)
 
 
 class IntegrationTestKassa(FrappeTestCase):

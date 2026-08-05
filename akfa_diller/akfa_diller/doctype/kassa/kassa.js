@@ -592,7 +592,10 @@ frappe.ui.form.on("Kassa", {
                 });
             }
 
-            if (in_list(["Customer", "Supplier"], frm.doc.party_type)) {
+            // Employee ham: uning "valyutasi" = maosh valyutasi (Salary
+            // Currency). Kassa valyutasi undan farq qilsa, konvertatsiya
+            // bloki (kurs + kontragent valyutasidagi summa) ochiladi.
+            if (in_list(["Customer", "Supplier", "Employee"], frm.doc.party_type)) {
                 frappe.call({
                     method: "akfa_diller.akfa_diller.doctype.kassa.kassa.get_party_currency",
                     args: {
