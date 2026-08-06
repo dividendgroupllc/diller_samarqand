@@ -18,7 +18,7 @@
    "in_standard_filter": 1,
    "label": "Dealer ID",
    "reqd": 1,
-   "description": "Qaysi bosh dilerning (Report Service Dealer Branch, is_main=1) o'z feedidagi clientCid ekanligi -- clientCid raqamlanishi har bir dealerId uchun mustaqil, shuning uchun bitta bosh diler doim yetarli emas, aynan shu dealerId+clientCid kombinatsiyasi kerak."
+   "description": "Qaysi filialning (Report Service Dealer Branch) o'z feedidagi clientCid ekanligi -- islagan filial (bosh diler yoki sub-filial) bo'lishi mumkin, is_main bilan bog'liq emas. clientCid raqamlanishi har bir dealerId uchun mustaqil, shuning uchun aynan shu dealerId+clientCid kombinatsiyasi kerak."
   },
   {
    "fieldname": "client_cid",

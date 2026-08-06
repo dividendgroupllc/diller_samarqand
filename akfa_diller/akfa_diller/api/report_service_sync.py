@@ -34,8 +34,9 @@ REQUIRED_SETTINGS_FIELDS = (
 # hardcoded constant -- this app is known to be copied to other dealer sites
 # (e.g. akfa_diller <- Pokiza), each with its own dealer branches, so a single
 # global dict here would silently misfile a different dealer's real
-# customer/supplier under a reused numeric id. It only matters for a "main"
-# dealer's own feed -- see the module docstring notes on PRIXOD_BAZA below for why.
+# customer/supplier under a reused numeric id. Checked against EVERY branch's
+# own feed, not just "main" ones -- see _process_cid_group for why (Nurobod,
+# a real sub-branch, needs its own "BAZA" identity mapped here too).
 #
 # Keyed by "{dealer_id}:{client_cid}", not bare client_cid -- once more than one
 # dealer network can be marked is_main (e.g. Samarqand-1's own network AND a
@@ -252,9 +253,10 @@ def _cid_group_priority(rows, branch, branch_warehouse_map) -> int:
     row_type = rows[0].get("type")
     client_cid = rows[0].get("clientCid")
 
-    if branch.is_main and branch_warehouse_map.get(f"{branch.dealer_id}:{client_cid}"):
+    if branch_warehouse_map.get(f"{branch.dealer_id}:{client_cid}"):
         # Branch transfer: normal direction is inflow-to-branch (tier 1),
         # VOZVRAT_KLIENT-tagged reverse direction is outflow-from-branch (tier 2).
+        # Not gated on is_main -- see _process_cid_group's docstring for why.
         return 2 if row_type == "VOZVRAT_KLIENT" else 1
 
     if row_type == "PRIXOD_BAZA":
@@ -270,30 +272,40 @@ def _process_cid_group(cid, rows, settings, branch, branch_warehouse_map) -> str
     row_type = rows[0].get("type")
     client_cid = rows[0].get("clientCid")
 
-    if branch.is_main:
-        branch_warehouse = branch_warehouse_map.get(f"{branch.dealer_id}:{client_cid}")
-        if branch_warehouse:
-            # A known branch/base identity, not a real customer/supplier -- always
-            # a Material Transfer, regardless of the row's declared type.
-            #
-            # Two distinct reporting perspectives use this same mapping:
-            #  - The historical case: a MAIN branch's own feed carries a clientCid
-            #    representing "chiqim to a sub-branch" (e.g. Samarqand-1's feed,
-            #    clientCid=7 -> Jomboy). RASXOD_KLIENT there means outflow FROM
-            #    branch.warehouse (Samarqand-1's own); VOZVRAT_KLIENT means the
-            #    sub-branch sending stock back (reverse: INTO branch.warehouse).
-            #  - The newer case: a SUB-branch's own feed carries a clientCid
-            #    representing its own upstream base (e.g. Nurobod's feed,
-            #    clientCid=1 "BAZA" -> Samarqand-1's own warehouse). Here PRIXOD_BAZA
-            #    means inflow TO branch.warehouse (Nurobod's own) FROM the mapped
-            #    warehouse -- the same "reverse" direction as VOZVRAT_KLIENT, just a
-            #    different type label because it's the RECEIVING side reporting it,
-            #    not the sending side.
-            # Both cases are "stock arrives at branch.warehouse from elsewhere" --
-            # VOZVRAT_KLIENT and PRIXOD_BAZA both mean that from branch.warehouse's
-            # own point of view, hence sharing the reverse=True direction.
-            reverse = row_type in ("VOZVRAT_KLIENT", "PRIXOD_BAZA")
-            return _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, reverse=reverse)
+    branch_warehouse = branch_warehouse_map.get(f"{branch.dealer_id}:{client_cid}")
+    if branch_warehouse:
+        # A known branch/base identity, not a real customer/supplier -- always
+        # a Material Transfer, regardless of the row's declared type. Checked
+        # for EVERY branch, not just is_main ones: the map is already scoped
+        # by "{dealer_id}:{client_cid}" (see _get_branch_warehouse_map), so a
+        # sub-branch's own dealer_id can only ever match a row created
+        # specifically for that sub-branch -- there's no cross-branch
+        # collision risk to gate against. is_main is a fully separate concern
+        # (see below: whether this branch's UNMAPPED PRIXOD_BAZA becomes a
+        # real Purchase Invoice) -- deliberately decoupled after Nurobod
+        # (structurally a sub-branch, is_main=0) needed this same mapping
+        # checked against its own feed to redirect its "BAZA" clientCid to a
+        # Stock Entry from Samarqand-1's warehouse, exactly like a real
+        # is_main branch's own transfer identities.
+        #
+        # Two distinct reporting perspectives use this same mapping:
+        #  - The historical case: a MAIN branch's own feed carries a clientCid
+        #    representing "chiqim to a sub-branch" (e.g. Samarqand-1's feed,
+        #    clientCid=7 -> Jomboy). RASXOD_KLIENT there means outflow FROM
+        #    branch.warehouse (Samarqand-1's own); VOZVRAT_KLIENT means the
+        #    sub-branch sending stock back (reverse: INTO branch.warehouse).
+        #  - The newer case: a SUB-branch's own feed carries a clientCid
+        #    representing its own upstream base (e.g. Nurobod's feed,
+        #    clientCid=1 "BAZA" -> Samarqand-1's own warehouse). Here PRIXOD_BAZA
+        #    means inflow TO branch.warehouse (Nurobod's own) FROM the mapped
+        #    warehouse -- the same "reverse" direction as VOZVRAT_KLIENT, just a
+        #    different type label because it's the RECEIVING side reporting it,
+        #    not the sending side.
+        # Both cases are "stock arrives at branch.warehouse from elsewhere" --
+        # VOZVRAT_KLIENT and PRIXOD_BAZA both mean that from branch.warehouse's
+        # own point of view, hence sharing the reverse=True direction.
+        reverse = row_type in ("VOZVRAT_KLIENT", "PRIXOD_BAZA")
+        return _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, reverse=reverse)
 
     if row_type == "RASXOD_KLIENT":
         return _handle_sale(cid, rows, settings, branch, is_return=False)
