@@ -1,0 +1,215 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_settings",
+  "company",
+  "mode_of_payment",
+  "column_break_1",
+  "posting_date",
+  "section_import",
+  "excel_file",
+  "column_break_2",
+  "status",
+  "naming_series",
+  "section_review",
+  "review_rows",
+  "section_results",
+  "kassa_docs",
+  "column_break_3",
+  "external_ref",
+  "processed_rows",
+  "section_logs",
+  "error_log",
+  "import_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_settings",
+   "fieldtype": "Section Break",
+   "label": "Import sozlamalari"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Компания",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "To'lov usuli",
+   "options": "Mode of Payment",
+   "default": "Cash",
+   "reqd": 1,
+   "description": "Excel'dagi \"Naqd\"/\"NAQT PUL\" shu usulga mos keladi -- shundan Kassa hisobi (cash_account) avtomatik aniqlanadi"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Import qilingan sana",
+   "reqd": 1,
+   "default": "Today",
+   "in_list_view": 1,
+   "description": "Faqat ro'yxat uchun -- Kassa sanalari Excel'dagi 'Sana' ustunidan olinadi"
+  },
+  {
+   "fieldname": "section_import",
+   "fieldtype": "Section Break",
+   "label": "Excel Import"
+  },
+  {
+   "fieldname": "excel_file",
+   "fieldtype": "Attach",
+   "label": "Excel fayl",
+   "description": "Kassa (to'lovlar) Excel fayli (.xlsx)"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nProcessing\nProcessed\nFailed",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "AKI-.YYYY.-.#####",
+   "default": "AKI-.YYYY.-.#####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "section_review",
+   "fieldtype": "Section Break",
+   "label": "Manfiy summali qatorlar (qo'lda tekshirish)",
+   "description": "\"Load Preview\" tugmasi shu ro'yxatni to'ldiradi -- har bir qatorga \"Turi\"ni tanlamaguningizcha Process Import ishlamaydi"
+  },
+  {
+   "fieldname": "review_rows",
+   "fieldtype": "Table",
+   "label": "Tekshirish kerak bo'lgan qatorlar",
+   "options": "Kassa Import Review Row"
+  },
+  {
+   "fieldname": "section_results",
+   "fieldtype": "Section Break",
+   "label": "Natijalar",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "kassa_docs",
+   "fieldtype": "Long Text",
+   "label": "Kassa hujjatlari",
+   "read_only": 1,
+   "description": "Har bir Excel qatori uchun alohida Kassa hujjati"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "external_ref",
+   "fieldtype": "Data",
+   "label": "External Reference (Excel Hash)",
+   "read_only": 1,
+   "unique": 1,
+   "description": "Bir xil faylni ikki marta import qilishning oldini olish uchun"
+  },
+  {
+   "fieldname": "processed_rows",
+   "fieldtype": "Long Text",
+   "label": "Processed Rows",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Ichki maqsad: qaysi Excel qatorlari allaqachon Kassa hujjatiga aylantirilgani (resume uchun)"
+  },
+  {
+   "fieldname": "section_logs",
+   "fieldtype": "Section Break",
+   "label": "Loglar",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Long Text",
+   "label": "Error Log",
+   "read_only": 1
+  },
+  {
+   "fieldname": "import_log",
+   "fieldtype": "Long Text",
+   "label": "Import Log",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Kassa Import",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "posting_date",
+ "track_changes": 1
+}

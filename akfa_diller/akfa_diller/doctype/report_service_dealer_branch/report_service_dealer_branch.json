@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "creation": "2026-08-01 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "dealer_id",
+  "label",
+  "is_main",
+  "legacy_unprefixed",
+  "company",
+  "column_break_1",
+  "warehouse",
+  "cost_center",
+  "customer_group"
+ ],
+ "fields": [
+  {
+   "fieldname": "dealer_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Dealer ID",
+   "reqd": 1,
+   "description": "Report Service API'dagi shu filialning dealerId qiymati"
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nomi",
+   "reqd": 1
+  },
+  {
+   "fieldname": "is_main",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Bosh diler",
+   "description": "Belgilansa -- PRIXOD_BAZA shu filialda Purchase Invoice sifatida qayta ishlanadi (haqiqiy tashqi xarid). Belgilanmasa -- PRIXOD_BAZA o'tkazib yuboriladi (bu allaqachon bosh dilerning \"filialga chiqim\" tomonidan qamrab olingan, ikki marta hisoblanmasin deb)."
+  },
+  {
+   "fieldname": "legacy_unprefixed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Eski prefikssiz ID (faqat Samarqand-1)",
+   "description": "FAQAT allaqachon prefikssiz cid/clientCid bilan sinxronlangan bitta bosh dilerda (hozir -- Samarqand-1) belgilangan bo'lishi kerak, orqaga moslik uchun. Yangi qo'shiladigan HAR QANDAY bosh diler (masalan Kattako'rg'on) uchun BELGILAMANG -- aks holda ikkala tarmoqning mijoz/hujjat ID'lari (masalan ikkalasining ham \"BAZA\" identifikatori) tasodifan bir xil raqamga to'g'ri kelib, bitta yozuvga birlashib ketishi mumkin."
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Компания",
+   "options": "Company",
+   "reqd": 1,
+   "description": "Shu filialning hujjatlari (Sales/Purchase Invoice, Stock Entry) qaysi Company'ga yoziladi -- har bir diler tarmog'i o'z Companysida bo'lishi mumkin"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ombor",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Customer Group",
+   "options": "Customer Group",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Report Service Dealer Branch",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

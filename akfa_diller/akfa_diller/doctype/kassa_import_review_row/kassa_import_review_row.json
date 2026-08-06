@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "row_num",
+  "date",
+  "person_text",
+  "izoh",
+  "amount",
+  "column_break_1",
+  "matched_customer",
+  "classification",
+  "expense_account",
+  "cost_center"
+ ],
+ "fields": [
+  {
+   "fieldname": "row_num",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Excel qator",
+   "read_only": 1
+  },
+  {
+   "fieldname": "date",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Sana",
+   "read_only": 1
+  },
+  {
+   "fieldname": "person_text",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mijozdan (Excel)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "izoh",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Izoh",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Summa",
+   "read_only": 1,
+   "description": "Excel'dagi manfiy qiymatning musbat (abs) ko'rinishi"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "matched_customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Topilgan mijoz",
+   "options": "Customer",
+   "description": "Avtomatik telefon/nom bo'yicha topilgan -- kerak bo'lsa boshqasini tanlang"
+  },
+  {
+   "fieldname": "classification",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Turi",
+   "options": "\nMijozga qaytarim\nXarajat",
+   "description": "Process Import tugmasi ishlashi uchun HAR BIR qatorda tanlanishi shart"
+  },
+  {
+   "fieldname": "expense_account",
+   "fieldtype": "Link",
+   "label": "Xarajat hisobi",
+   "options": "Account",
+   "depends_on": "eval:doc.classification === 'Xarajat'",
+   "mandatory_depends_on": "eval:doc.classification === 'Xarajat'"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "depends_on": "eval:doc.classification === 'Xarajat'",
+   "mandatory_depends_on": "eval:doc.classification === 'Xarajat'"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Kassa Import Review Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

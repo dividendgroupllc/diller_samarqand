@@ -1,0 +1,66 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{dealer_id}-{client_cid}",
+ "creation": "2026-07-31 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "dealer_id",
+  "client_cid",
+  "warehouse"
+ ],
+ "fields": [
+  {
+   "fieldname": "dealer_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Dealer ID",
+   "reqd": 1,
+   "description": "Qaysi bosh dilerning (Report Service Dealer Branch, is_main=1) o'z feedidagi clientCid ekanligi -- clientCid raqamlanishi har bir dealerId uchun mustaqil, shuning uchun bitta bosh diler doim yetarli emas, aynan shu dealerId+clientCid kombinatsiyasi kerak."
+  },
+  {
+   "fieldname": "client_cid",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Service Client CID",
+   "reqd": 1,
+   "description": "Report Service API'dagi clientCid qiymati -- shu ID bilan kelgan tranzaksiya doim Material Transfer bo'ladi, hech qachon Sales/Purchase Invoice emas"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Filial ombori",
+   "options": "Warehouse",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Report Service Branch Warehouse",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

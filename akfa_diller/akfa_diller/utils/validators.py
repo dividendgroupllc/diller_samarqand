@@ -72,6 +72,19 @@ def validate_items_exist(items: List[Dict]) -> Dict:
         row_num = item.get("row_num", 0)
 
         if not original_name:
+            # Never silently drop a row -- a blank name from a machine feed
+            # (Report Service API) is real, missing data, not a spacer row to
+            # skip (Excel imports never reach here with a blank name at all --
+            # excel_service.py's own _read_data_rows() already filters those
+            # out upstream). Silently `continue`-ing here previously let a
+            # cid's Sales/Purchase Invoice or Stock Entry get created with
+            # fewer/lower-quantity items than the real transaction, with
+            # success=True and zero trace in any log.
+            errors.append({
+                "row": row_num,
+                "item_name": original_name,
+                "error": _("Qator {0}: tovar nomi bo'sh").format(row_num),
+            })
             continue
 
         if original_name in item_cache:
@@ -88,12 +101,17 @@ def validate_items_exist(items: List[Dict]) -> Dict:
             # length so this is deterministic (the shortest superset of
             # original_name is the most likely correct match) rather than
             # whichever row the DB happens to return first among several
-            # substring collisions.
+            # substring collisions. Raw SQL here (not frappe.db.get_value's
+            # order_by=) -- confirmed live that passing a function expression
+            # through get_value's order_by raises "Unknown column
+            # 'length(item_name)'" (the query builder quotes it as a plain
+            # identifier instead of raw SQL).
             if not item_code:
-                item_code = frappe.db.get_value(
-                    "Item", {"item_name": ["like", f"%{original_name}%"]}, "name",
-                    order_by="length(item_name) asc",
+                rows = frappe.db.sql(
+                    "SELECT name FROM `tabItem` WHERE item_name LIKE %s ORDER BY LENGTH(item_name) ASC LIMIT 1",
+                    (f"%{original_name}%",),
                 )
+                item_code = rows[0][0] if rows else None
 
             item_cache[original_name] = item_code
 
