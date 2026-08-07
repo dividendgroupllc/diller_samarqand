@@ -8,6 +8,7 @@
  "field_order": [
   "section_settings",
   "company",
+  "branch",
   "mode_of_payment",
   "column_break_1",
   "posting_date",
@@ -43,13 +44,21 @@
    "in_standard_filter": 1
   },
   {
+   "fieldname": "branch",
+   "fieldtype": "Select",
+   "label": "Filial",
+   "options": "\nIshtixon\nMitan\nMirbozor\nKattaqo'rg'on",
+   "depends_on": "eval:doc.company==\"Kattaqo'rg'on\"",
+   "mandatory_depends_on": "eval:doc.company==\"Kattaqo'rg'on\"",
+   "description": "Kattaqo'rg'on tarmog'ining har bir filiali o'z alohida Naqt/Plastik hisobiga ega -- fayl aynan qaysi filialga tegishli ekanini tanlang"
+  },
+  {
    "fieldname": "mode_of_payment",
    "fieldtype": "Link",
-   "label": "To'lov usuli",
+   "label": "To'lov usuli (Naqt)",
    "options": "Mode of Payment",
-   "default": "Cash",
    "reqd": 1,
-   "description": "Excel'dagi \"Naqd\"/\"NAQT PUL\" shu usulga mos keladi -- shundan Kassa hisobi (cash_account) avtomatik aniqlanadi"
+   "description": "Excel'dagi oddiy (Naqt/NAXT) qatorlar shu usulga yoziladi -- shundan Kassa hisobi (cash_account) avtomatik aniqlanadi. Plastik/Karta belgili qatorlar avtomatik mos Plastik hisobiga yo'naltiriladi (Компания/Filial bo'yicha)."
   },
   {
    "fieldname": "column_break_1",

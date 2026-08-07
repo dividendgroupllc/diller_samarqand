@@ -12,9 +12,50 @@ from akfa_diller.akfa_diller.services import kassa_excel_service
 
 DOCTYPE = "Kassa Import"
 
+# Each real branch has its own distinct Karta/Plastik cash account (confirmed
+# live 2026-08-08 -- Samarqand Diller shares one across all its sub-branches,
+# but the Kattaqo'rg'on network has 4 separate ones). Naqt rows keep using
+# whatever Mode of Payment the user picked on the Kassa Import doc itself
+# (unchanged); only Plastik rows need this extra lookup. Keyed the same way
+# _resolve_mode_of_payment reads it: (company, branch-or-None).
+PLASTIK_MODE_OF_PAYMENT = {
+    ("Samarqand Diller", None): "Plastik Samarqand diller",
+    ("Kattaqo'rg'on", "Ishtixon"): "Plastik Ishtixon - K",
+    ("Kattaqo'rg'on", "Mitan"): "Plastik Mitan - K",
+    ("Kattaqo'rg'on", "Mirbozor"): "Plastik Mirbozor - K",
+    ("Kattaqo'rg'on", "Kattaqo'rg'on"): "Plastik Kattaqo'rg'on - K",
+}
+
+
+_DATE_FORMATS = ("%d.%m.%Y", "%d-%m-%Y")  # "payments" format uses dots, "receipts list" format uses dashes
+
 
 def _parse_date(date_str: str) -> str:
-    return datetime.strptime(date_str, "%d.%m.%Y").strftime("%Y-%m-%d")
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(date_str, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    frappe.throw(_("Sana formati tanilmadi: {0!r}").format(date_str))
+
+
+def _resolve_mode_of_payment(doc, payment_account: str) -> str:
+    """Naqt rows always use the doc's own selected `mode_of_payment` (unchanged
+    behavior). Plastik rows are routed to a separate, per-(company, branch)
+    Mode of Payment -- see PLASTIK_MODE_OF_PAYMENT."""
+    if payment_account != "PLASTIK":
+        return doc.mode_of_payment
+
+    key = (doc.company, doc.branch if doc.company == "Kattaqo'rg'on" else None)
+    plastik_mode = PLASTIK_MODE_OF_PAYMENT.get(key)
+    if not plastik_mode:
+        frappe.throw(
+            _("\"{0}\" (filial: {1}) uchun Plastik to'lov usuli sozlanmagan -- "
+              "avval uni yarating (Mode of Payment + Mode of Payment Account).").format(
+                doc.company, doc.branch or "-"
+            )
+        )
+    return plastik_mode
 
 
 def _extract_name_part(text: str) -> str:
@@ -42,6 +83,24 @@ def _resolve_branch_for_diler(diler_text: str):
     for branch in branches:
         if branch.label and branch.label.lower() in diler_lower:
             return branch
+    return None
+
+
+def _resolve_branch(doc, diler_text: str):
+    """Prefer matching the Excel row's own "Diler" text (works for the
+    "payments" format); fall back to the Kassa Import doc's own `branch`
+    field for formats that carry no per-row branch text at all (the
+    "Список получения" format -- always single-branch per file, so the doc's
+    own selection is the only source of truth there)."""
+    branch = _resolve_branch_for_diler(diler_text)
+    if branch:
+        return branch
+    if not doc.branch:
+        return None
+    settings = frappe.get_single("Report Service Settings")
+    for b in settings.dealer_branches or []:
+        if b.label == doc.branch:
+            return b
     return None
 
 
@@ -82,20 +141,20 @@ def _match_customer(person_text: str) -> Optional[str]:
     return None
 
 
-def _get_or_create_customer(person_text: str, diler_text: str, log: callable) -> str:
+def _get_or_create_customer(doc, person_text: str, diler_text: str, log: callable) -> str:
     matched = _match_customer(person_text)
     if matched:
         return matched
 
-    branch = _resolve_branch_for_diler(diler_text)
+    branch = _resolve_branch(doc, diler_text)
     if not branch:
-        # No Report Service Dealer Branch label matches this Excel row's "Diler"
-        # text -- there is no safe customer_group to guess (Report Service
-        # Settings has no such default field either), so ask rather than
-        # silently misfile this customer under the wrong branch.
+        # Neither the Excel row's own "Diler" text nor the Kassa Import doc's
+        # `branch` field matched a known Report Service Dealer Branch -- there
+        # is no safe customer_group to guess, so ask rather than silently
+        # misfile this customer under the wrong branch.
         frappe.throw(
-            _("\"{0}\" uchun mos filial (Report Service Dealer Branch) topilmadi -- "
-              "avval shu filialni qo'shing yoki Excel'dagi Diler nomini tekshiring.").format(diler_text)
+            _("\"{0}\" uchun mos filial topilmadi -- avval shu filialni qo'shing, Excel'dagi "
+              "Diler nomini tekshiring, yoki Kassa Import'da 'Filial' maydonini tanlang.").format(diler_text)
         )
 
     settings = frappe.get_single("Report Service Settings")
@@ -162,7 +221,7 @@ def get_preview_data(doc_name: str) -> Dict:
             continue
 
         matched_customer = _match_customer(row["person_text"])
-        branch = _resolve_branch_for_diler(row["diler"])
+        branch = _resolve_branch(doc, row["diler"])
         negative_rows.append({
             "row_num": row["row_num"],
             "date": row["date"],
@@ -210,6 +269,9 @@ def process_import(doc_name: str) -> Dict:
 
     if not doc.company or not doc.mode_of_payment:
         return {"success": False, "message": _("Компания va To'lov usuli tanlanmagan")}
+
+    if doc.company == "Kattaqo'rg'on" and not doc.branch:
+        return {"success": False, "message": _("Kattaqo'rg'on tarmog'i uchun 'Filial' tanlanishi shart")}
 
     unclassified = [r.row_num for r in doc.review_rows if not r.classification]
     if unclassified:
@@ -404,18 +466,18 @@ def _create_kassa_doc(doc, row: Dict, review_row, log: callable) -> str:
     kassa = frappe.new_doc("Kassa")
     kassa.date = posting_date
     kassa.company = doc.company
-    kassa.mode_of_payment = doc.mode_of_payment
+    kassa.mode_of_payment = _resolve_mode_of_payment(doc, row.get("payment_account", "NAQT"))
     kassa.remarks = row["izoh"] or None
 
     if not is_expense_flow:
         # Positive RECEIPT -- a straightforward cash receipt from a real customer.
-        customer = _get_or_create_customer(row["person_text"], row["diler"], log)
+        customer = _get_or_create_customer(doc, row["person_text"], row["diler"], log)
         kassa.transaction_type = "Приход"
         kassa.party_type = "Customer"
         kassa.party = customer
         kassa.amount = abs(row["amount"])
     elif review_row and review_row.classification == "Mijozga qaytarim":
-        customer = review_row.matched_customer or _get_or_create_customer(row["person_text"], row["diler"], log)
+        customer = review_row.matched_customer or _get_or_create_customer(doc, row["person_text"], row["diler"], log)
         kassa.transaction_type = "Расход"
         kassa.party_type = "Customer"
         kassa.party = customer

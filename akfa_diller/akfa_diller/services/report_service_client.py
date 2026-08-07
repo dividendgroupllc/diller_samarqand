@@ -1,16 +1,18 @@
 from datetime import datetime, timedelta
 from time import sleep
-from typing import Dict, List, Tuple
 
 import frappe
 import requests
+from frappe.utils import add_days, getdate
 from frappe.utils.password import get_decrypted_password
+from typing import Dict, List, Tuple
 
 DEFAULT_BASE_URL = "http://api-report.akfadiler.uz"
 MAX_WINDOW_DAYS = 30  # API hard limit: 409 "Интервал не должен превышать 30 дней" beyond this
-PAGE_LENGTH = 2000
+PAGE_LENGTH = 3000
 MAX_RETRIES = 5
 RETRY_BACKOFF_SECONDS = 5
+SLEEP_BETWEEN_CALLS = 4.0
 
 
 def get_settings_and_password():
@@ -136,32 +138,57 @@ def get_token() -> Tuple[str, str]:
     return base_url, token
 
 
-def fetch_all_rows_for_dealer(base_url: str, token: str, dealer_id, from_date_str: str, to_date_str: str) -> List[Dict]:
-    """Fetches every row for a single dealerId across the given date range
-    (auto-chunked into <=30-day windows). Only the first page (length=PAGE_LENGTH)
-    of each window is fetched -- offset-based pagination ("start") was found
-    unreliable against the live API during research (returned empty pages even at
-    valid offsets), so looping on it risks silently duplicating or dropping rows.
-    A scheduled sync's window is normally just a few days (well under PAGE_LENGTH
-    rows per dealer), so this is not a practical limitation; if a window's
-    recordsFiltered ever exceeds what a single page returns, that is logged loudly
-    rather than silently under-processed."""
-    all_rows = []
-    for window_from, window_to in _split_windows(from_date_str, to_date_str):
-        page = fetch_report_page(base_url, token, dealer_id, window_from, window_to)
-        rows = page.get("data") or []
-        all_rows.extend(rows)
+def _fetch_window_adaptive(base_url: str, token: str, dealer_id, from_date: str, to_date: str, depth: int = 0) -> List[Dict]:
+    """Fetches one <=30-day window, recursively bisecting the date range whenever
+    a single page (length=PAGE_LENGTH) can't hold everything the API reports via
+    recordsFiltered. offset-based pagination ("start") was found unreliable
+    against the live API during earlier research (returned empty pages even at
+    valid offsets) -- bisecting by DATE instead of by offset sidesteps that
+    entirely and was already proven live across an hours-long historical
+    backfill (see the one-off _backfill_transactions.py this was ported from).
 
-        records_filtered = page.get("recordsFiltered") or 0
+    This matters even for a normal few-day scheduled sync window, not just a
+    historical backfill: Samarqand-1 alone was confirmed (2026-08-07) to
+    generate ~660 rows/day, so even a 4-day catch-up window can exceed
+    PAGE_LENGTH on a single busy branch. Before this fix, fetch_all_rows_for_dealer
+    only ever fetched page 1 of each window and logged a warning on overflow --
+    the excess rows (which can include purchases/branch-transfers, not just
+    sales) were silently never synced, and since the sync watermark
+    (last_synced_date) only moves forward, that gap never gets a second chance
+    to be picked up by a later run."""
+    page = fetch_report_page(base_url, token, dealer_id, from_date, to_date, length=PAGE_LENGTH)
+    sleep(SLEEP_BETWEEN_CALLS)
+    rows = page.get("data") or []
+    records_filtered = page.get("recordsFiltered") or 0
+
+    if records_filtered <= len(rows) or from_date == to_date:
         if records_filtered > len(rows):
             frappe.log_error(
-                title="Report Service: sahifa to'liq emas",
+                title=f"Report Service: bir kunlik chegara oshib ketdi (dealerId={dealer_id})",
                 message=(
-                    f"dealerId={dealer_id}, oyna {window_from}..{window_to}: "
-                    f"recordsFiltered={records_filtered}, lekin faqat {len(rows)} qator olindi "
-                    f"(PAGE_LENGTH={PAGE_LENGTH}). Ba'zi tranzaksiyalar shu safar sinxronlanmagan "
-                    "bo'lishi mumkin -- sync oynasini qisqartirish (tezroq ishga tushirish) tavsiya etiladi."
+                    f"{from_date}: recordsFiltered={records_filtered}, faqat {len(rows)} qator olindi "
+                    f"(PAGE_LENGTH={PAGE_LENGTH}). Bitta kun ichida shu qadar ko'p tranzaksiya bo'lishi "
+                    "kutilmagan -- qo'lda tekshirish tavsiya etiladi."
                 ),
             )
+        return rows
+
+    start = getdate(from_date)
+    end = getdate(to_date)
+    mid = start + (end - start) // 2
+    mid_str = mid.strftime("%Y-%m-%d")
+    left = _fetch_window_adaptive(base_url, token, dealer_id, from_date, mid_str, depth + 1)
+    right = _fetch_window_adaptive(base_url, token, dealer_id, add_days(mid_str, 1), to_date, depth + 1)
+    return left + right
+
+
+def fetch_all_rows_for_dealer(base_url: str, token: str, dealer_id, from_date_str: str, to_date_str: str) -> List[Dict]:
+    """Fetches every row for a single dealerId across the given date range,
+    auto-chunked into <=30-day windows and, within each, adaptively bisected by
+    date whenever a single page can't hold everything (see
+    _fetch_window_adaptive)."""
+    all_rows = []
+    for window_from, window_to in _split_windows(from_date_str, to_date_str):
+        all_rows.extend(_fetch_window_adaptive(base_url, token, dealer_id, window_from, window_to))
 
     return all_rows

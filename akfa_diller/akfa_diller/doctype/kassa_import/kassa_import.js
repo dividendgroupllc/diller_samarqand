@@ -62,12 +62,19 @@ frappe.ui.form.on('Kassa Import', {
         frm.trigger('validate_prerequisites');
     },
 
+    branch(frm) {
+        frm.trigger('validate_prerequisites');
+    },
+
     validate_prerequisites(frm) {
-        const valid = frm.doc.company && frm.doc.mode_of_payment;
+        const needs_branch = frm.doc.company === "Kattaqo'rg'on";
+        const valid = frm.doc.company && frm.doc.mode_of_payment && (!needs_branch || frm.doc.branch);
         frm.set_df_property('excel_file', 'read_only', valid ? 0 : 1);
         frm.set_df_property('excel_file', 'description', valid
             ? "Kassa (to'lovlar) Excel fayli (.xlsx)"
-            : '<span style="color:red;">⚠️ Avval Компания va To\'lov usulini tanlang!</span>'
+            : needs_branch && frm.doc.company && frm.doc.mode_of_payment
+                ? '<span style="color:red;">⚠️ Avval Filialni tanlang!</span>'
+                : '<span style="color:red;">⚠️ Avval Компания va To\'lov usulini tanlang!</span>'
         );
     },
 

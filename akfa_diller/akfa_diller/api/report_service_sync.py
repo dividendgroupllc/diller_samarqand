@@ -1,5 +1,8 @@
+import re
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List
+from urllib.parse import unquote
 
 import frappe
 from frappe.utils import today, getdate
@@ -11,6 +14,23 @@ from akfa_diller.akfa_diller.services.stock_entry_service import stock_entry_ser
 from akfa_diller.akfa_diller.utils.validators import validate_items_exist
 
 OVERLAP_DAYS = 3
+MAX_HEAL_ATTEMPTS = 30  # a single branch-transfer cid can bundle 50+ distinct
+# items (confirmed live 2026-08-07: a Kattaqo'rg'on->Ishtixon transfer needed
+# healing on several different items in sequence, one shortfall discovered
+# per attempt) -- healing is pure local DB work (no external API call), so a
+# higher cap costs nothing but time and closes real transactions that would
+# otherwise fail forever at the old cap of 6.
+
+# Matches both NegativeStockError message shapes ERPNext raises (see
+# erpnext/stock/stock_ledger.py raise_exceptions / validate_negative_stock):
+# "<strong>30.0</strong> units of <a .../Item/NAME" style...>...</a> needed in
+# <a .../Warehouse/WH" ...>...</a> [on DATE TIME for VOUCHER] to complete..."
+_NEG_STOCK_RE = re.compile(
+    r"(?:<strong>)?([\d.]+)(?:</strong>)?\s+units of\s+"
+    r'<a href="/app/Form/Item/([^"]+)"[^>]*>.*?</a>\s+needed in\s+'
+    r'<a href="/app/Form/Warehouse/([^"]+)"',
+    re.DOTALL,
+)
 REQUIRED_SETTINGS_FIELDS = (
     "default_territory",
     "default_supplier_group",
@@ -46,6 +66,106 @@ REQUIRED_SETTINGS_FIELDS = (
 def _get_branch_warehouse_map() -> Dict[str, str]:
     rows = frappe.get_all("Report Service Branch Warehouse", fields=["dealer_id", "client_cid", "warehouse"])
     return {f"{row.dealer_id}:{row.client_cid}": row.warehouse for row in rows}
+
+
+def _try_heal_negative_stock(error_message, branch, cid_rows, all_branches) -> bool:
+    """On a NegativeStockError, parse exactly which item/warehouse/qty was short
+    and inject a same-day Material Receipt for that shortfall dated just before
+    the failing transaction (posting_time 00:00:01, vs the 23:59:59 every real
+    synced document uses) -- so the correction lands at the actual point in
+    history the real stock was missing, not just "today". Returns True if a
+    correction was made (caller should retry the cid).
+
+    The source system (dealer's own POS) allows an item's balance to go
+    negative (an oversell on their end); ERPNext structurally cannot represent
+    negative stock, so without this, a live sync run hits NegativeStockError,
+    logs it, and silently skips that transaction forever -- the gap between
+    ERPNext and the source system's balance would then grow every time this
+    happens, exactly the drift the initial historical backfill had to heal
+    once already. This makes the SAME correction happen automatically on every
+    scheduled run, not just during a one-off backfill.
+
+    The shortfall warehouse is not always `branch`'s own: a branch-transfer cid
+    (e.g. a Kattaqo'rg'on->Ishtixon PRIXOD_BAZA row, processed while iterating
+    Ishtixon) draws down the SENDING branch's warehouse, not the receiving
+    branch's -- confirmed live (2026-08-07): several Kattaqo'rg'on->Ishtixon
+    transfers were permanently stuck because the shortfall was in
+    "Kattaqo'rg'on Asosiy - K" while `branch` was Ishtixon, and blindly
+    refusing to touch a warehouse the current branch doesn't own left these
+    transactions failing on every single backfill/sync run forever, with no
+    path to ever self-heal. `all_branches` (every configured dealer branch,
+    not just the one currently being processed) lets this look up whether the
+    shortfall warehouse actually belongs to one of OUR OWN branches -- if so,
+    it's still fully our own inventory, just under a different branch's
+    company/cost_center, and healing it there is exactly as safe as healing
+    `branch`'s own warehouse. Only a warehouse matching NO known branch is
+    still refused (genuinely unrelated / unexpected)."""
+    m = _NEG_STOCK_RE.search(error_message)
+    if not m:
+        frappe.log_error(title=f"Report Service sync: heal regex mos kelmadi ({branch.label})", message=error_message[:2000])
+        return False
+
+    qty_needed = float(m.group(1))
+    item_code = unquote(m.group(2))
+    warehouse = unquote(m.group(3))
+
+    owning_branch = branch
+    if warehouse != branch.warehouse:
+        owning_branch = next((b for b in all_branches if b.warehouse == warehouse), None)
+        if not owning_branch:
+            frappe.log_error(
+                title=f"Report Service sync: heal ombor mos kelmadi ({branch.label})",
+                message=f"error warehouse={warehouse!r} vs branch.warehouse={branch.warehouse!r}\nitem={item_code!r} qty={qty_needed}",
+            )
+            return False  # not any known branch's warehouse -- don't guess
+
+    rate = frappe.db.get_value("Bin", {"item_code": item_code, "valuation_rate": [">", 0]}, "valuation_rate")
+    allow_zero = not rate
+    rate = rate or 0
+
+    posting_date = _parse_date(cid_rows[0]["date"])
+
+    se = frappe.new_doc("Stock Entry")
+    se.company = owning_branch.company
+    se.stock_entry_type = "Material Receipt"
+    se.purpose = "Material Receipt"
+    se.set_posting_time = 1
+    se.posting_date = posting_date
+    se.posting_time = "00:00:01"
+    if owning_branch.cost_center:
+        se.cost_center = owning_branch.cost_center
+    item_row = {
+        "item_code": item_code,
+        "qty": qty_needed,
+        "basic_rate": rate,
+        "t_warehouse": warehouse,
+        "cost_center": owning_branch.cost_center or None,
+    }
+    if allow_zero:
+        item_row["allow_zero_valuation_rate"] = 1
+    se.append("items", item_row)
+    se.flags.ignore_permissions = True
+
+    # Retry on lock contention specifically -- a scheduled sync run can overlap
+    # with another admin action writing to the same warehouse's Bin; a
+    # transient DocumentLockedError/"Lock wait timeout" clears up on its own
+    # within a few seconds and is not a real data problem worth giving up on.
+    last_err = None
+    for lock_attempt in range(4):
+        try:
+            se.insert()
+            se.submit()
+            return True
+        except Exception as e:
+            frappe.db.rollback()  # rollback also undoes a just-succeeded insert() if submit() is what failed
+            last_err = e
+            msg = str(e)
+            if "DocumentLockedError" in type(e).__name__ or "Lock wait timeout" in msg:
+                time.sleep(6)
+                se.name = None  # force a fresh insert on retry -- the rollback above means the prior insert never durably happened
+                continue
+            raise
+    raise last_err
 
 
 @frappe.whitelist()
@@ -136,27 +256,46 @@ def sync_report_service():
         )
 
         for cid, cid_rows in ordered_cids:
-            try:
-                result = _process_cid_group(cid, cid_rows, settings, branch, branch_warehouse_map)
-                if result == "processed":
-                    processed += 1
-                    # Commit this cid's writes now, isolated from whatever the next
-                    # cid does -- otherwise everything shares one transaction that
-                    # only commits at the very end (_finish()), so a LATER cid's
-                    # failure would roll back nothing (see except branch) but a
-                    # partial write from that same failed cid could otherwise still
-                    # ride along into the final commit.
-                    frappe.db.commit()
-                else:
+            for attempt in range(MAX_HEAL_ATTEMPTS):
+                try:
+                    result = _process_cid_group(cid, cid_rows, settings, branch, branch_warehouse_map)
+                    if result == "processed":
+                        processed += 1
+                        # Commit this cid's writes now, isolated from whatever the next
+                        # cid does -- otherwise everything shares one transaction that
+                        # only commits at the very end (_finish()), so a LATER cid's
+                        # failure would roll back nothing (see except branch) but a
+                        # partial write from that same failed cid could otherwise still
+                        # ride along into the final commit.
+                        frappe.db.commit()
+                    else:
+                        skipped += 1
+                    break
+                except Exception as e:
+                    # Undo any partial writes this specific cid made before failing
+                    # (e.g. an auto-created Customer/Item right before the invoice
+                    # submission itself threw) -- without this, those orphaned records
+                    # would sit uncommitted and still get swept into the final commit.
+                    frappe.db.rollback()
+                    if "NegativeStockError" in type(e).__name__ or "needed in" in str(e):
+                        try:
+                            healed = _try_heal_negative_stock(str(e), branch, cid_rows, settings.dealer_branches)
+                        except Exception as heal_err:
+                            frappe.db.rollback()
+                            healed = False
+                            frappe.log_error(
+                                title=f"Report Service sync: heal xatosi, {branch.label} cid {cid}",
+                                message=f"{heal_err!r}\n\noriginal: {e}",
+                            )
+                        if healed:
+                            frappe.db.commit()
+                            continue
+                    frappe.log_error(title=f"Report Service sync: {branch.label} cid {cid}", message=str(e))
+                    errors.append(f"{branch.label} cid {cid}: {e}")
                     skipped += 1
-            except Exception as e:
-                # Undo any partial writes this specific cid made before failing
-                # (e.g. an auto-created Customer/Item right before the invoice
-                # submission itself threw) -- without this, those orphaned records
-                # would sit uncommitted and still get swept into the final commit.
-                frappe.db.rollback()
-                frappe.log_error(title=f"Report Service sync: {branch.label} cid {cid}", message=str(e))
-                errors.append(f"{branch.label} cid {cid}: {e}")
+                    break
+            else:
+                errors.append(f"{branch.label} cid {cid}: {MAX_HEAL_ATTEMPTS} marta tuzatishga urinildi, muvaffaqiyatsiz")
                 skipped += 1
 
         total_processed += processed
@@ -493,6 +632,21 @@ def _get_or_create_customer(client_cid, client_name, phone, settings, branch):
         if existing:
             return existing
 
+    # Fall back to an exact name match before creating a new record. This site
+    # already had 500+ real Customer records (and several Suppliers) entered
+    # before this sync's client_cid tagging existed -- without this, the first
+    # transaction naming one of them would either silently create a duplicate
+    # (Customer's naming_series autoname just appends "- 1", no error) or hit a
+    # raw primary-key IntegrityError (Supplier's autoname doesn't). client_name
+    # here always embeds a phone number (the source system's own convention),
+    # so an exact string match is a safe identity match, not a coincidence risk.
+    if client_name:
+        name_match = frappe.db.get_value("Customer", {"customer_name": client_name}, "name")
+        if name_match:
+            if ref_client_cid is not None:
+                frappe.db.set_value("Customer", name_match, "custom_report_service_client_cid", ref_client_cid)
+            return name_match
+
     customer = frappe.new_doc("Customer")
     customer.customer_name = client_name or f"Report Service mijoz {client_cid}"
     customer.customer_group = branch.customer_group
@@ -520,6 +674,16 @@ def _get_or_create_supplier(client_cid, client_name, phone, settings, branch):
         )
         if existing:
             return existing
+
+    # Same pre-existing-record reasoning as _get_or_create_customer -- this
+    # site's 2 real base/supplier records ("BAZA...", "Самарканд База Катта
+    # Курган") were entered before client_cid tagging existed.
+    if client_name:
+        name_match = frappe.db.get_value("Supplier", {"supplier_name": client_name}, "name")
+        if name_match:
+            if ref_client_cid is not None:
+                frappe.db.set_value("Supplier", name_match, "custom_report_service_client_cid", ref_client_cid)
+            return name_match
 
     supplier = frappe.new_doc("Supplier")
     supplier.supplier_name = client_name or f"Report Service ta'minotchi {client_cid}"
