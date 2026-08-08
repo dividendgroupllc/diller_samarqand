@@ -463,6 +463,22 @@ def _process_cid_group(cid, rows, settings, branch, branch_warehouse_map) -> str
         # not a stock-only movement.
         return _handle_purchase(cid, rows, settings, branch)
 
+    if row_type is None:
+        # Confirmed live (2026-08-08): a small, bounded set of real customer
+        # transactions come back from the API with type=null (not just the
+        # already-handled branch-transfer identities above, which are caught
+        # by the branch_warehouse_map check regardless of type). Previously
+        # these were silently skipped forever -- with no clientCid match to a
+        # known branch/base identity, the far more common case is an ordinary
+        # client-facing sale that the source system just didn't tag, not a
+        # genuinely new transaction category. Defaulting to a regular sale
+        # closes that gap; an actually-new row shape from the API would still
+        # need its own explicit handling above, so this fallback is
+        # deliberately scoped to exactly type=None, not "any unrecognized
+        # type" (a non-null-but-unknown string still logs and skips below,
+        # since that could be a real new type worth investigating specifically).
+        return _handle_sale(cid, rows, settings, branch, is_return=False)
+
     frappe.log_error(
         title=f"Report Service sync: notanish type, {branch.label} cid {cid}",
         message=f"type={row_type!r}, {len(rows)} qator o'tkazib yuborildi.",
