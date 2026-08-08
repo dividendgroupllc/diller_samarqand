@@ -168,7 +168,14 @@ def _get_or_create_customer(doc, person_text: str, diler_text: str, log: callabl
         )
 
     settings = frappe.get_single("Report Service Settings")
-    customer_name = person_text.strip() or _("Noma'lum mijoz")
+    # ERPNext's own Customer.on_update() -> create_primary_contact() builds
+    # Contact.name as "{full_name}-{link_name}" (link_name defaults to the
+    # customer's own name) -- for a long source name this can exceed the
+    # `name` column's 140-char limit and crash the insert entirely.
+    # Confirmed live 2026-08-08 on a real 70-char name (two phone numbers in
+    # parens). Capped well under half of 140 so the doubled construction
+    # stays safe even with Frappe's own "-1"/"-2" dedup suffixes.
+    customer_name = (person_text.strip() or _("Noma'lum mijoz"))[:60]
 
     if not person_text.strip():
         # Blank source name -- reuse ONE shared "Noma'lum mijoz" record per
@@ -545,7 +552,13 @@ def cancel_import(doc_name: str) -> Dict:
                     kassa.cancel()
 
         doc.db_set("status", "Draft")
-        doc.db_set("external_ref", "")
+        # NULL, not "" -- external_ref has a unique index, and MySQL enforces
+        # uniqueness on empty string (unlike NULL, which is exempt). Clearing
+        # to "" meant the FIRST cancel on a site succeeded but permanently
+        # occupied the one allowed empty-string slot -- every cancel after
+        # that failed with (1062, "Duplicate entry '' for key 'external_ref'"),
+        # confirmed live 2026-08-08.
+        doc.db_set("external_ref", None)
         doc.db_set("import_log", "")
         doc.db_set("kassa_docs", "")
         doc.db_set("processed_rows", "")
