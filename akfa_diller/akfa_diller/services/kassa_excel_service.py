@@ -81,20 +81,36 @@ def read_kassa_report(file_url: str) -> List[Dict]:
         wb.close()
 
 
+def _row_has_data(row) -> bool:
+    return any(v is not None and str(v).strip() for v in row)
+
+
 def _read_payments_format(worksheet, header_row: int) -> List[Dict]:
     """`DELETED` rows are dropped entirely here -- they are not real
     transactions (confirmed against real data: some show up mid-file with
-    every other field identical to an active row, just re-flagged)."""
+    every other field identical to an active row, just re-flagged).
+
+    A row with a blank "Sana" cell but real data elsewhere is NOT silently
+    dropped (confirmed live 2026-08-08: this used to vanish with zero trace,
+    not counted anywhere) -- it's collected and reported as a hard error
+    listing the exact row numbers, matching how a malformed (non-blank) date
+    already behaves. Only a row with NO data in any column at all (a true
+    blank/end-of-data row) is skipped silently."""
     rows = []
+    blank_date_rows = []
     for row_num, row in enumerate(
         worksheet.iter_rows(min_row=header_row + 1, max_col=len(_COLUMNS_PAYMENTS), values_only=True),
         start=header_row + 1,
     ):
-        if row[0] is None:
+        if not _row_has_data(row):
             continue
 
         record = dict(zip(_COLUMNS_PAYMENTS, row))
         if (record.get("status") or "").strip().upper() == "DELETED":
+            continue
+
+        if not (record.get("date") or "").strip():
+            blank_date_rows.append(row_num)
             continue
 
         payment_type = (record.get("payment_type") or "").strip().upper()
@@ -115,21 +131,33 @@ def _read_payments_format(worksheet, header_row: int) -> List[Dict]:
             "payment_account": "NAQT",
         })
 
+    if blank_date_rows:
+        frappe.throw(
+            _("Quyidagi qatorlarda 'Sana' bo'sh, lekin boshqa ma'lumot bor: {0}. "
+              "Excel faylda sanani to'ldiring yoki qatorni butunlay o'chirib qayta yuklang.").format(
+                ", ".join(str(r) for r in blank_date_rows)
+            )
+        )
+
     return rows
 
 
 def _read_receipts_list_format(worksheet, header_row: int) -> List[Dict]:
     rows = []
+    blank_date_rows = []
     for row_num, row in enumerate(
         worksheet.iter_rows(min_row=header_row + 1, max_col=len(_COLUMNS_RECEIPTS_LIST), values_only=True),
         start=header_row + 1,
     ):
-        if row[0] is None:
+        if not _row_has_data(row):
             continue
 
         record = dict(zip(_COLUMNS_RECEIPTS_LIST, row))
         date_val = record.get("date")
         date_str = date_val.strftime("%d.%m.%Y") if hasattr(date_val, "strftime") else str(date_val or "").strip()
+        if not date_str:
+            blank_date_rows.append(row_num)
+            continue
 
         rows.append({
             "row_num": row_num,
@@ -141,6 +169,14 @@ def _read_receipts_list_format(worksheet, header_row: int) -> List[Dict]:
             "amount": parse_numeric(record.get("amount")),
             "payment_account": _normalize_payment_account(record.get("payment_account")),
         })
+
+    if blank_date_rows:
+        frappe.throw(
+            _("Quyidagi qatorlarda 'Дата' bo'sh, lekin boshqa ma'lumot bor: {0}. "
+              "Excel faylda sanani to'ldiring yoki qatorni butunlay o'chirib qayta yuklang.").format(
+                ", ".join(str(r) for r in blank_date_rows)
+            )
+        )
 
     return rows
 

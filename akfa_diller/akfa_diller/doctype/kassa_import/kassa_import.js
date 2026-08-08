@@ -135,6 +135,22 @@ frappe.ui.form.on('Kassa Import', {
                 frm.set_value('error_log', '');
                 frm.save().then(() => frm.trigger('process_import'));
             }).addClass('btn-warning');
+
+            // A Failed import can have already created some Kassa docs before
+            // the row that errored (each row commits as it succeeds) -- the
+            // backend already allows cancelling a Failed import for exactly
+            // this reason (see daily_kassa_import.cancel_import), but this
+            // button was missing here, leaving no way to abandon (rather than
+            // retry) a partially-failed import from the UI.
+            frm.add_custom_button(__('✕ Cancel Import'), () => frm.trigger('cancel_import')).addClass('btn-danger');
+
+            if (frm.doc.kassa_docs) {
+                const names = frm.doc.kassa_docs.split(',').map(s => s.trim()).filter(s => s);
+                if (names.length) {
+                    frm.add_custom_button(__('Kassa ({0})', [names.length]),
+                        () => frappe.set_route('List', 'Kassa', { name: ['in', names] }), __('View'));
+                }
+            }
         }
     },
 

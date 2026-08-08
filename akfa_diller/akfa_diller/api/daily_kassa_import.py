@@ -39,6 +39,16 @@ def _parse_date(date_str: str) -> str:
     frappe.throw(_("Sana formati tanilmadi: {0!r}").format(date_str))
 
 
+def _is_expense_flow(row: Dict) -> bool:
+    """A row is an outflow (Расход) either because its amount is negative
+    (the only real-data case seen so far) OR because the source explicitly
+    tagged it PAYMENT (money out) regardless of the amount's sign -- the two
+    sample files' active PAYMENT rows all happened to be soft-deleted, so a
+    PAYMENT row with a POSITIVE amount was never exercised against real data
+    and would otherwise have been silently booked as a customer receipt."""
+    return row["amount"] < 0 or row.get("payment_type") == "PAYMENT"
+
+
 def _resolve_mode_of_payment(doc, payment_account: str) -> str:
     """Naqt rows always use the doc's own selected `mode_of_payment` (unchanged
     behavior). Plastik rows are routed to a separate, per-(company, branch)
@@ -158,9 +168,21 @@ def _get_or_create_customer(doc, person_text: str, diler_text: str, log: callabl
         )
 
     settings = frappe.get_single("Report Service Settings")
+    customer_name = person_text.strip() or _("Noma'lum mijoz")
+
+    if not person_text.strip():
+        # Blank source name -- reuse ONE shared "Noma'lum mijoz" record per
+        # branch instead of creating a fresh near-duplicate for every such
+        # row (confirmed live 2026-08-08: this silently flooded the Customer
+        # list with "Noma'lum mijoz", "Noma'lum mijoz - 1", "- 2", ...).
+        existing = frappe.db.get_value(
+            "Customer", {"customer_name": customer_name, "customer_group": branch.customer_group}, "name"
+        )
+        if existing:
+            return existing
 
     customer = frappe.new_doc("Customer")
-    customer.customer_name = person_text.strip() or _("Noma'lum mijoz")
+    customer.customer_name = customer_name
     customer.customer_group = branch.customer_group
     customer.territory = settings.default_territory
     phone = kassa_excel_service.extract_phone(person_text)
@@ -212,7 +234,7 @@ def get_preview_data(doc_name: str) -> Dict:
             zero_count += 1
             continue
 
-        if row["amount"] > 0:
+        if not _is_expense_flow(row):
             positive_count += 1
             if _match_customer(row["person_text"]):
                 matched_count += 1
@@ -226,7 +248,7 @@ def get_preview_data(doc_name: str) -> Dict:
             "row_num": row["row_num"],
             "date": row["date"],
             "person_text": row["person_text"],
-            "izoh": row["izoh"],
+            "izoh": row["izoh"] + (" [PAYMENT, musbat summa]" if row["amount"] > 0 and row.get("payment_type") == "PAYMENT" else ""),
             "amount": abs(row["amount"]),
             "matched_customer": matched_customer,
             "cost_center": branch.cost_center if branch else None,
@@ -461,7 +483,7 @@ def _process_import_sync(doc_name: str) -> Dict:
 
 def _create_kassa_doc(doc, row: Dict, review_row, log: callable) -> str:
     posting_date = _parse_date(row["date"])
-    is_expense_flow = row["amount"] < 0
+    is_expense_flow = _is_expense_flow(row)
 
     kassa = frappe.new_doc("Kassa")
     kassa.date = posting_date
@@ -490,7 +512,7 @@ def _create_kassa_doc(doc, row: Dict, review_row, log: callable) -> str:
         kassa.amount = abs(row["amount"])
     else:
         raise Exception(
-            _("Qator {0} manfiy summali, lekin tekshirish qatori (review_rows) topilmadi").format(row["row_num"])
+            _("Qator {0} chiqim (manfiy summa yoki PAYMENT), lekin tekshirish qatori (review_rows) topilmadi").format(row["row_num"])
         )
 
     kassa.flags.ignore_permissions = True
