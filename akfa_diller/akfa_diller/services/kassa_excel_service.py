@@ -153,6 +153,11 @@ def _read_receipts_list_format(worksheet, header_row: int) -> List[Dict]:
             continue
 
         record = dict(zip(_COLUMNS_RECEIPTS_LIST, row))
+
+        # footer/jami-summa qatori: "id" ham "person_text" ham bo'sh -- bu ma'lumot qatori emas
+        if not str(record.get("id") or "").strip() and not str(record.get("person_text") or "").strip():
+            continue
+
         date_val = record.get("date")
         date_str = date_val.strftime("%d.%m.%Y") if hasattr(date_val, "strftime") else str(date_val or "").strip()
         if not date_str:
