@@ -1,5 +1,6 @@
 import re
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Dict, List
 from urllib.parse import unquote
@@ -574,12 +575,52 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
             "cnt": len(items),
         },
     )
-    if twin:
+    twin_name = twin[0][0] if twin else None
+
+    if twin_name is None:
+        # Ikkinchi qoida (o'xshashlik): ikki tomon bir yukni HAR XIL jami bilan
+        # yozgan bo'lishi mumkin (iyul tahlilida 21 ta shunday juft chiqqan --
+        # masalan biri 241, biri 716 deb yozgan) -- bunda yuqoridagi aniq qoida
+        # ojiz. O'rniga qator darajasida solishtiramiz: boshqa feed'dan yozilgan
+        # nomzod SE bilan aynan bir xil (tovar, dona) qatorlar kamida 3 ta VA
+        # kiruvchi yukning kamida yarmini tashkil qilsa -- bu o'sha yukning
+        # ikkinchi talqini. Chegara ataylab qattiq (50%, min 3 qator): yumshoq
+        # chegara ikki ALOHIDA haqiqiy yukni ham "egizak" deb yo'q qilib
+        # yuborishi mumkin edi -- dublikat ko'rinadi va tozalanadi, yo'qotish
+        # esa jimgina yo'qoladi, shuning uchun xato tomonga emas, ehtiyot
+        # tomonga og'amiz.
+        cand_rows = frappe.db.sql(
+            """
+            select se.name, sed.item_code, sed.qty
+            from `tabStock Entry` se
+            join `tabStock Entry Detail` sed on sed.parent = se.name
+            where se.docstatus = 1
+              and se.custom_report_service_cid is not null
+              and se.custom_report_service_cid != ''
+              and se.custom_report_service_cid not like %(my_prefix)s
+              and se.posting_date between date_sub(%(pd)s, interval 2 day)
+                                      and date_add(%(pd)s, interval 2 day)
+              and sed.s_warehouse = %(source)s and sed.t_warehouse = %(target)s
+            """,
+            {"my_prefix": my_prefix, "pd": posting_date, "source": source, "target": target},
+        )
+        by_doc = {}
+        for name, code, q in cand_rows:
+            by_doc.setdefault(name, []).append((code, round(float(q or 0), 2)))
+        my_lines = Counter((i["item_code"], round(float(i["qty"]), 2)) for i in items)
+        for name, lines in by_doc.items():
+            other = Counter(lines)
+            matched_lines = sum(min(my_lines[k], other[k]) for k in my_lines)
+            if matched_lines >= 3 and matched_lines * 2 >= len(items):
+                twin_name = name
+                break
+
+    if twin_name:
         # Har 5-daqiqalik sync bir xil twin'ni qayta-qayta ko'raveradi (ref'siz
         # skip bo'lgani uchun) -- Error Log emas, oddiy logger, aks holda bitta
         # doimiy twin kuniga ~300 ta xato yozuvini yaratadi (42540 saboqlari).
         frappe.logger("report_service_sync").info(
-            f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin[0][0]} "
+            f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin_name} "
             f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
         )
         return "skipped"
@@ -696,6 +737,15 @@ def _resolve_items(rows, settings) -> Dict:
         # skipping the whole transaction.
         for err in result["errors"]:
             _get_or_create_item(err.get("item_name"), settings)
+        # Yangi yaratilgan Item'lar darhol commit qilinadi: aks holda shu cid
+        # keyinroq NegativeStockError bilan rollback bo'lsa, endi-yaratilgan
+        # Item ham u bilan birga yo'q bo'lib ketadi -- heal esa xatoda nomi
+        # turgan, lekin endi mavjud bo'lmagan itemga kirim yozolmay har
+        # urinishda qaytadan yiqiladi (2026-08-09: Cho'pon ota'ning 5 ta yuki
+        # aynan shu zanjir tufayli abadiy 'is not a stock Item' bilan qolgan).
+        # Katalog yozuvi sifatida Item baribir doimiy kerak -- erta commit
+        # qilish xavfsiz.
+        frappe.db.commit()
         result = validate_items_exist(candidates)
 
     return result
