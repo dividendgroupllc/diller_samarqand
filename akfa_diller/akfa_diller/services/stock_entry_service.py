@@ -81,6 +81,13 @@ class StockEntryService:
                     "s_warehouse": config.source_warehouse,
                     "t_warehouse": config.target_warehouse,
                     "cost_center": config.cost_center or None,
+                    # An explicit basic_rate is always supplied from the source
+                    # feed's own amount/qty -- ERPNext doesn't need to derive one
+                    # from prior valuation history, so this avoids "Valuation Rate
+                    # is required" blocking a transfer for an item that has never
+                    # been valued before (confirmed live 2026-08-09, Mitan cid
+                    # 24759/24747 among others).
+                    "allow_zero_valuation_rate": 1,
                 })
 
             se.flags.ignore_permissions = True

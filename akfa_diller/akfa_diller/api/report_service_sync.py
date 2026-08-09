@@ -14,12 +14,22 @@ from akfa_diller.akfa_diller.services.stock_entry_service import stock_entry_ser
 from akfa_diller.akfa_diller.utils.validators import validate_items_exist
 
 OVERLAP_DAYS = 3
-MAX_HEAL_ATTEMPTS = 30  # a single branch-transfer cid can bundle 50+ distinct
-# items (confirmed live 2026-08-07: a Kattaqo'rg'on->Ishtixon transfer needed
-# healing on several different items in sequence, one shortfall discovered
-# per attempt) -- healing is pure local DB work (no external API call), so a
-# higher cap costs nothing but time and closes real transactions that would
-# otherwise fail forever at the old cap of 6.
+MAX_HEAL_ATTEMPTS = 500  # a single branch-transfer cid can bundle 78+ distinct
+# items (confirmed live 2026-08-09: six July transfers of 25-78 lines each were
+# permanently lost because the old cap of 30 ran out mid-document -- one
+# shortfall is discovered per attempt, so the cap must exceed the worst-case
+# line count with several shortfalls per line). Healing is pure local DB work
+# (no external API call), and the stall guard in the retry loop stops runaway
+# repetition of an identical shortfall, so a high cap only costs time on
+# documents that are actually converging.
+MAX_SAME_SHORTFALL_REPEATS = 50  # the SAME (qty, item, warehouse) shortfall
+# recurring is usually still progress, not a stall: several already-existing
+# future SLEs can each be short by the same amount (confirmed live 2026-08-09:
+# a 1.0-unit shortfall on the same item recurred a handful of times while the
+# deficit was walked down one equal step per heal, and an abort-on-first-repeat
+# guard misclassified five converging documents as stuck). Only when one
+# identical signature has repeated this many times is it a genuine echo (the
+# injected receipt never reaches the draw point).
 
 # Matches both NegativeStockError message shapes ERPNext raises (see
 # erpnext/stock/stock_ledger.py raise_exceptions / validate_negative_stock):
@@ -256,6 +266,7 @@ def sync_report_service():
         )
 
         for cid, cid_rows in ordered_cids:
+            healed_signatures = {}
             for attempt in range(MAX_HEAL_ATTEMPTS):
                 try:
                     result = _process_cid_group(cid, cid_rows, settings, branch, branch_warehouse_map)
@@ -278,18 +289,27 @@ def sync_report_service():
                     # would sit uncommitted and still get swept into the final commit.
                     frappe.db.rollback()
                     if "NegativeStockError" in type(e).__name__ or "needed in" in str(e):
-                        try:
-                            healed = _try_heal_negative_stock(str(e), branch, cid_rows, settings.dealer_branches)
-                        except Exception as heal_err:
-                            frappe.db.rollback()
-                            healed = False
-                            frappe.log_error(
-                                title=f"Report Service sync: heal xatosi, {branch.label} cid {cid}",
-                                message=f"{heal_err!r}\n\noriginal: {e}",
-                            )
-                        if healed:
-                            frappe.db.commit()
-                            continue
+                        # Stall guard: the same shortfall signature recurring a few
+                        # times is normal convergence (see MAX_SAME_SHORTFALL_REPEATS)
+                        # -- only an excessive repeat count means the injected receipt
+                        # never reaches the draw point and the cid can never converge.
+                        sig_m = _NEG_STOCK_RE.search(str(e))
+                        sig = (sig_m.group(1), sig_m.group(2), sig_m.group(3)) if sig_m else None
+                        if sig is None or healed_signatures.get(sig, 0) < MAX_SAME_SHORTFALL_REPEATS:
+                            try:
+                                healed = _try_heal_negative_stock(str(e), branch, cid_rows, settings.dealer_branches)
+                            except Exception as heal_err:
+                                frappe.db.rollback()
+                                healed = False
+                                frappe.log_error(
+                                    title=f"Report Service sync: heal xatosi, {branch.label} cid {cid}",
+                                    message=f"{heal_err!r}\n\noriginal: {e}",
+                                )
+                            if healed:
+                                if sig:
+                                    healed_signatures[sig] = healed_signatures.get(sig, 0) + 1
+                                frappe.db.commit()
+                                continue
                     frappe.log_error(title=f"Report Service sync: {branch.label} cid {cid}", message=str(e))
                     errors.append(f"{branch.label} cid {cid}: {e}")
                     skipped += 1
@@ -507,6 +527,62 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
     ]
 
     source, target = (branch_warehouse, branch.warehouse) if reverse else (branch.warehouse, branch_warehouse)
+
+    # Kross-feed dublikat himoyasi: uchta juftlikda (Nurobod, Ishtixon, Mitan)
+    # transferning IKKALA tomoni ham xaritalangan -- jo'natuvchi filial feed'i ham,
+    # qabul qiluvchi filial feed'i ham xuddi shu jismoniy yukni o'z cid'i bilan
+    # yozadi. cid'lar feed'lararo bog'lanmagan (36:xxx vs 161:yyy), shuning uchun
+    # yuqoridagi exists-tekshiruv bu dublni ushlamaydi -- iyulda shu yo'l bilan 28
+    # ta dublikat yaralgan edi (keyin qo'lda bekor qilindi). Bir xil (ombor
+    # juftligi, jami dona, qator soni) +-2 kun ichida BOSHQA feed'dan allaqachon
+    # yozilgan bo'lsa -- bu o'sha yukning ikkinchi tomoni: yaratmaymiz. Ikkala
+    # o'lchov ham teng bo'lishi talab qilinadi (faqat jami dona emas), chunki
+    # 120-donalik kabi yumaloq jamilar har xil yuklarda tasodifan teng chiqishi
+    # mumkin; tovar nomlari esa ATAYLAB solishtirilmaydi -- ikki feed bir xil
+    # tovarni har xil nomlaydi (masalan '(N)' suffiksli variantlar), 2026-08-09
+    # dagi Mitan tahlilida aynan nom farqi tufayli bir xil yuk 'boshqa' bo'lib
+    # ko'ringan.
+    total_qty = round(sum(i["qty"] for i in items), 2)
+    my_prefix = f"{branch.dealer_id}:%"
+    posting_date = _parse_date(first["date"])
+    twin = frappe.db.sql(
+        """
+        select se.name
+        from `tabStock Entry` se
+        join (
+            select sed.parent, sum(sed.qty) as tq, count(*) as cnt,
+                   min(sed.s_warehouse) as s_wh, min(sed.t_warehouse) as t_wh
+            from `tabStock Entry Detail` sed
+            group by sed.parent
+        ) agg on agg.parent = se.name
+        where se.docstatus = 1
+          and se.custom_report_service_cid is not null
+          and se.custom_report_service_cid != ''
+          and se.custom_report_service_cid not like %(my_prefix)s
+          and se.posting_date between date_sub(%(pd)s, interval 2 day)
+                                  and date_add(%(pd)s, interval 2 day)
+          and agg.s_wh = %(source)s and agg.t_wh = %(target)s
+          and round(agg.tq, 2) = %(total_qty)s and agg.cnt = %(cnt)s
+        limit 1
+        """,
+        {
+            "my_prefix": my_prefix,
+            "pd": posting_date,
+            "source": source,
+            "target": target,
+            "total_qty": total_qty,
+            "cnt": len(items),
+        },
+    )
+    if twin:
+        # Har 5-daqiqalik sync bir xil twin'ni qayta-qayta ko'raveradi (ref'siz
+        # skip bo'lgani uchun) -- Error Log emas, oddiy logger, aks holda bitta
+        # doimiy twin kuniga ~300 ta xato yozuvini yaratadi (42540 saboqlari).
+        frappe.logger("report_service_sync").info(
+            f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin[0][0]} "
+            f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
+        )
+        return "skipped"
     config = StockEntryConfig(
         company=branch.company,
         source_warehouse=source,
