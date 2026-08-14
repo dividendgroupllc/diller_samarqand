@@ -1,0 +1,1104 @@
+/* Copyright (c) 2026, akfa_diller and contributors
+ * Oyna sex — boshqaruv paneli uslublari.
+ *
+ * Frappe CSS o'zgaruvchilaridan foydalanadi (--fg-color, --text-color, ...),
+ * shuning uchun yorug' va qorong'i mavzuda ham to'g'ri ko'rinadi.
+ */
+
+.oyna-dash {
+	--od-gap: 14px;
+	--od-radius: 10px;
+	--od-border: 1px solid var(--border-color);
+	--od-good: #0f9d58;
+	--od-bad: #e24c4c;
+	--od-warn: #d38b1e;
+	font-variant-numeric: tabular-nums;
+	padding-bottom: 40px;
+}
+
+/* --------------------------------------------------------------- toolbar */
+
+.oyna-dash .od-toolbar {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+	background: var(--fg-color);
+	border-bottom: var(--od-border);
+	padding: 10px 0 8px;
+	margin-bottom: 12px;
+}
+
+.oyna-dash .od-toolbar__row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.oyna-dash .od-toolbar__row--filters {
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px dashed var(--border-color);
+}
+
+.oyna-dash .od-spacer {
+	flex: 1 1 auto;
+}
+
+.oyna-dash .od-chipgroup {
+	display: inline-flex;
+	background: var(--control-bg);
+	border-radius: 8px;
+	padding: 2px;
+	gap: 2px;
+}
+
+.oyna-dash .od-chip {
+	border: 0;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--text-sm);
+	font-weight: 500;
+	padding: 5px 12px;
+	border-radius: 6px;
+	white-space: nowrap;
+	transition: background 0.12s ease, color 0.12s ease;
+}
+
+.oyna-dash .od-chip:hover {
+	color: var(--text-color);
+}
+
+.oyna-dash .od-chip.is-active {
+	background: var(--fg-color);
+	color: var(--text-color);
+	box-shadow: var(--shadow-base);
+}
+
+.oyna-dash .od-chip--sm {
+	padding: 5px 10px;
+	font-size: var(--text-xs);
+	letter-spacing: 0.03em;
+}
+
+/* ------------------------------------------------- sana oralig'i kalendari */
+
+.oyna-dash .od-cal {
+	position: relative;
+}
+
+.oyna-dash .od-cal__trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	background: var(--control-bg);
+	border: var(--od-border);
+	border-radius: 8px;
+	padding: 6px 12px;
+	font-size: var(--text-sm);
+	font-weight: 500;
+	color: var(--text-color);
+	white-space: nowrap;
+	transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.oyna-dash .od-cal__trigger:hover {
+	border-color: var(--primary);
+}
+
+.oyna-dash .od-cal__trigger svg {
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.oyna-dash .od-cal__caret {
+	color: var(--text-muted);
+	font-size: 10px;
+	line-height: 1;
+}
+
+.oyna-dash .od-cal__pop {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 30;
+	background: var(--fg-color);
+	border: var(--od-border);
+	border-radius: var(--od-radius);
+	box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.18));
+	overflow: hidden;
+}
+
+.oyna-dash .od-cal__pop.is-open {
+	display: flex;
+}
+
+.oyna-dash .od-cal__presets {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 10px 8px;
+	border-right: var(--od-border);
+	background: var(--control-bg);
+	min-width: 138px;
+}
+
+.oyna-dash .od-cal__presets-title {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-muted);
+	padding: 2px 8px 6px;
+}
+
+.oyna-dash .od-cal__preset {
+	border: 0;
+	background: transparent;
+	text-align: left;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	padding: 6px 10px;
+	border-radius: 6px;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-cal__preset:hover {
+	background: var(--fg-color);
+}
+
+.oyna-dash .od-cal__preset.is-active {
+	background: var(--primary);
+	color: #fff;
+	font-weight: 500;
+}
+
+.oyna-dash .od-cal__main {
+	display: flex;
+	flex-direction: column;
+	padding: 8px 10px 10px;
+}
+
+.oyna-dash .od-cal__picker .datepicker-inline .datepicker {
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+}
+
+.oyna-dash .od-cal__foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 14px;
+	border-top: var(--od-border);
+	padding-top: 9px;
+	margin-top: 4px;
+}
+
+.oyna-dash .od-cal__preview {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.oyna-dash .od-cal__preview b {
+	color: var(--text-color);
+	font-weight: 600;
+}
+
+.oyna-dash .od-cal__preview span {
+	color: var(--text-muted);
+	background: var(--control-bg);
+	border-radius: 4px;
+	padding: 1px 6px;
+	margin-left: 4px;
+	font-size: var(--text-xs);
+}
+
+.oyna-dash .od-cal__actions {
+	display: inline-flex;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.oyna-dash .od-cal__tip {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-top: 6px;
+}
+
+.oyna-dash .od-field {
+	min-width: 160px;
+	flex: 0 1 200px;
+}
+
+.oyna-dash .od-field .form-group {
+	margin-bottom: 0;
+}
+
+.oyna-dash .od-field .control-label {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: 2px;
+}
+
+.oyna-dash .od-refresh.is-busy {
+	opacity: 0.6;
+	pointer-events: none;
+}
+
+.oyna-dash .od-refresh.is-busy svg {
+	animation: od-spin 0.9s linear infinite;
+}
+
+@keyframes od-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* --------------------------------------------------------------- context */
+
+.oyna-dash .od-context {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 16px;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	margin-bottom: 14px;
+}
+
+.oyna-dash .od-context__item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.oyna-dash .od-context__item--strong {
+	color: var(--text-color);
+	font-weight: 600;
+}
+
+.oyna-dash .od-context__item--muted {
+	opacity: 0.75;
+}
+
+.oyna-dash .od-context__item--warn {
+	color: var(--od-warn);
+	font-weight: 500;
+}
+
+/* ------------------------------------------------------------------- KPI */
+
+.oyna-dash .od-kpis {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: var(--od-gap);
+	margin-bottom: 22px;
+}
+
+/* Oxirgi to'liqmas qatordagi kartalar bo'sh joyni bo'lib oladi.
+ * Faqat 4 ustunli (keng ekran) ko'rinishda — torroq ekranlarda bekor qilinadi. */
+.oyna-dash .od-card--span2 {
+	grid-column: span 2;
+}
+.oyna-dash .od-card--span3 {
+	grid-column: span 3;
+}
+.oyna-dash .od-card--span4 {
+	grid-column: span 4;
+}
+
+.oyna-dash .od-card {
+	position: relative;
+	background: var(--card-bg, var(--fg-color));
+	border: var(--od-border);
+	border-radius: var(--od-radius);
+	padding: 14px 16px 12px;
+	min-height: 118px;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	overflow: hidden;
+	transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.oyna-dash .od-card[data-section],
+.oyna-dash .od-card[data-route] {
+	cursor: pointer;
+}
+
+.oyna-dash .od-card[data-section]:hover,
+.oyna-dash .od-card[data-route]:hover {
+	border-color: var(--primary);
+	transform: translateY(-1px);
+}
+
+.oyna-dash .od-card::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 3px;
+	background: var(--text-muted);
+	opacity: 0.7;
+}
+
+.oyna-dash .od-card--primary::before {
+	background: #3b7ddd;
+}
+.oyna-dash .od-card--success::before {
+	background: var(--od-good);
+}
+.oyna-dash .od-card--danger::before {
+	background: var(--od-bad);
+}
+.oyna-dash .od-card--warning::before {
+	background: var(--od-warn);
+}
+.oyna-dash .od-card--info::before {
+	background: #5b6be0;
+}
+
+.oyna-dash .od-card__head {
+	display: flex;
+	align-items: flex-start;
+	gap: 4px 10px;
+}
+
+.oyna-dash .od-card__label {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	font-weight: 500;
+	letter-spacing: 0.01em;
+	/* Sarlavha HECH QACHON qisqartirilmaydi: sig'masa keyingi qatorga o'tadi */
+	flex: 1 1 auto;
+	min-width: 0;
+	line-height: 1.3;
+}
+
+/* Nishon kartaning pastki-o'ng burchagida — sarlavhani qisib qo'ymasligi uchun */
+.oyna-dash .od-card__badge {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--text-muted);
+	background: var(--control-bg);
+	border-radius: 4px;
+	padding: 1px 5px;
+	white-space: nowrap;
+	flex: 0 0 auto;
+	margin-left: auto;
+	align-self: flex-end;
+}
+
+.oyna-dash .od-card__value {
+	font-size: 22px;
+	font-weight: 650;
+	line-height: 1.15;
+	color: var(--heading-color, var(--text-color));
+	margin: 8px 0 6px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.oyna-dash .od-card__foot {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+/* Qo'shimcha sanoq (masalan «37 Qarzdorlar») — kartaning yuqori-o'ng burchagida */
+/* Qo'shimcha sanoq (masalan «37 Qarzdorlar») — kartaning yuqori-o'ng burchagida.
+ * Bir nechta bo'lsa tartibli ustun bo'lib, o'ngga tekislanib tushadi —
+ * shunda tasodifiy o'ralish o'rniga bir tekis ro'yxat ko'rinadi. */
+.oyna-dash .od-card__details {
+	/* Oqimdan chiqarilgan: sanoqlar soni sarlavha qatorining balandligiga
+	 * ta'sir qilmaydi, shuning uchun SUMMA barcha kartalarda bir xil
+	 * balandlikda turadi (y o'qi bo'yicha tekis). */
+	position: absolute;
+	top: 14px;
+	right: 16px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 1px;
+	text-align: right;
+	pointer-events: none;
+}
+
+/* Pastki-o'ng qismdagi qo'shimcha sanoqlar — oqimda, bir qatorda */
+.oyna-dash .od-card__details--foot {
+	position: static;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 2px 10px;
+	margin-left: auto;
+	pointer-events: auto;
+}
+
+/* Sanoq bor kartada sarlavha unga kirib bormasligi uchun joy qoldiriladi */
+.oyna-dash .od-card--has-details .od-card__label {
+	padding-right: 110px;
+}
+
+.oyna-dash .od-card__detail {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	line-height: 1.35;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-card__detail b {
+	color: var(--text-color);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.oyna-dash .od-delta {
+	font-weight: 600;
+	border-radius: 4px;
+	padding: 1px 6px;
+	background: var(--control-bg);
+	white-space: nowrap;
+}
+
+.oyna-dash .od-delta--good {
+	color: var(--od-good);
+	background: rgba(15, 157, 88, 0.1);
+}
+
+.oyna-dash .od-delta--bad {
+	color: var(--od-bad);
+	background: rgba(226, 76, 76, 0.1);
+}
+
+.oyna-dash .od-delta--flat {
+	color: var(--text-muted);
+}
+
+/* -------------------------------------------------------------- sections */
+
+.oyna-dash .od-row {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--od-gap);
+	margin-bottom: var(--od-gap);
+	/* align-items sukut bo'yicha "stretch" — bir qatordagi bloklar eng
+	 * balandiga tenglashadi. Ilgari bu yerda "start" edi, shuning uchun har bir
+	 * blok o'z kontenti balandligida qolib, chekkalar tekis chiqmasdi. */
+}
+
+.oyna-dash .od-row:has(> .od-block--wide) {
+	grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+}
+
+.oyna-dash .od-block--full {
+	grid-column: 1 / -1;
+}
+
+.oyna-dash .od-block {
+	background: var(--card-bg, var(--fg-color));
+	border: var(--od-border);
+	border-radius: var(--od-radius);
+	padding: 16px 18px 18px;
+	transition: box-shadow 0.3s ease;
+}
+
+.oyna-dash .od-block--flash {
+	box-shadow: 0 0 0 2px var(--primary);
+}
+
+.oyna-dash .od-block__head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.oyna-dash .od-block__title {
+	font-size: var(--text-md);
+	font-weight: 600;
+	margin: 0;
+	color: var(--heading-color, var(--text-color));
+}
+
+.oyna-dash .od-block__subtitle {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: 2px 0 0;
+}
+
+.oyna-dash .od-link {
+	border: 0;
+	background: transparent;
+	color: var(--primary);
+	font-size: var(--text-sm);
+	font-weight: 500;
+	white-space: nowrap;
+	padding: 0;
+}
+
+.oyna-dash .od-link:hover {
+	text-decoration: underline;
+}
+
+/* ----------------------------------------------------------------- stats */
+
+.oyna-dash .od-stats {
+	/* auto-fit — blokdagi ko'rsatkichlar soni 3 ta bo'lsa ham bo'sh joy qolmaydi */
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.oyna-dash .od-stat {
+	background: var(--control-bg);
+	border-radius: 8px;
+	padding: 8px 10px;
+	min-width: 0;
+}
+
+/* Bitta ko'rsatkich qolganda katak kengroq bo'lsin — uzun summa sig'ishi uchun */
+.oyna-dash .od-stats--single {
+	grid-template-columns: minmax(200px, 300px);
+}
+
+.oyna-dash .od-stat span {
+	display: block;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: 3px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.oyna-dash .od-stat b {
+	font-size: var(--text-base);
+	font-weight: 600;
+	color: var(--text-color);
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Pul qiymati: konvertatsiya yo'q, shuning uchun bir ko'rsatkichda bir nechta
+ * valyuta bo'lishi mumkin — har biri alohida qatorda. */
+.oyna-dash .od-cur {
+	display: block;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-cur + .od-cur {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	font-weight: 500;
+	margin-top: 1px;
+}
+
+.oyna-dash .od-good {
+	color: var(--od-good) !important;
+}
+.oyna-dash .od-bad {
+	color: var(--od-bad) !important;
+}
+.oyna-dash .od-warn {
+	color: var(--od-warn) !important;
+}
+
+.oyna-dash .od-note {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	background: var(--control-bg);
+	border-radius: 6px;
+	padding: 7px 10px;
+	margin-bottom: 12px;
+}
+
+.oyna-dash .od-hint {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: 10px 0 0;
+	line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+.oyna-dash .od-table-wrap {
+	overflow-x: auto;
+}
+
+/* Uzun ro'yxat (zakazlar) — yig'ish o'rniga scroll; sarlavha qatori yopishib turadi */
+.oyna-dash .od-table-wrap--scroll {
+	max-height: 420px;
+	overflow-y: auto;
+}
+
+.oyna-dash .od-table-wrap--scroll thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--card-bg, var(--fg-color));
+}
+
+.oyna-dash .od-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--text-sm);
+}
+
+.oyna-dash .od-table th {
+	font-size: var(--text-xs);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+	padding: 6px 8px;
+	border-bottom: var(--od-border);
+	white-space: nowrap;
+}
+
+.oyna-dash .od-table td {
+	padding: 8px;
+	border-bottom: 1px solid var(--border-color);
+	vertical-align: middle;
+	color: var(--text-color);
+}
+
+.oyna-dash .od-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.oyna-dash .od-table tbody tr.is-clickable {
+	cursor: pointer;
+}
+
+.oyna-dash .od-table tbody tr.is-clickable:hover {
+	background: var(--control-bg);
+}
+
+.oyna-dash .od-swatch {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	margin-right: 7px;
+	vertical-align: 1px;
+}
+
+.oyna-dash .od-table small {
+	display: block;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	font-weight: 400;
+	margin-top: 1px;
+}
+
+/* Faqat rang belgisi bor katakda ikkinchi qator belgidan keyin tekislanadi */
+.oyna-dash .od-table .od-swatch ~ small {
+	margin-left: 15px;
+}
+
+.oyna-dash .od-align-left {
+	text-align: left;
+}
+.oyna-dash .od-align-right {
+	text-align: right;
+}
+.oyna-dash .od-align-center {
+	text-align: center;
+}
+
+/* Yig'iladigan jadval: ortiqcha qatorlar yopiq holatda ko'rinmaydi */
+.oyna-dash .od-table-wrap:not(.is-expanded) tr.od-row-extra {
+	display: none;
+}
+
+.oyna-dash .od-more {
+	display: block;
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+	font-weight: 500;
+	padding: 7px 0 2px;
+	border-top: 1px solid var(--border-color);
+	margin-top: 2px;
+}
+
+.oyna-dash .od-more:hover {
+	color: var(--primary);
+	background: var(--control-bg);
+	border-radius: 0 0 6px 6px;
+}
+
+.oyna-dash .od-pill {
+	display: inline-block;
+	font-size: var(--text-xs);
+	font-weight: 500;
+	border-radius: 20px;
+	padding: 2px 9px;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-pill--ok {
+	color: var(--od-good);
+	background: rgba(15, 157, 88, 0.12);
+}
+.oyna-dash .od-pill--warn {
+	color: var(--od-warn);
+	background: rgba(211, 139, 30, 0.14);
+}
+.oyna-dash .od-pill--bad {
+	color: var(--od-bad);
+	background: rgba(226, 76, 76, 0.12);
+}
+
+/* Zakaz holati ranglari — workflow uslubidan keladi (warning/primary/...) */
+.oyna-dash .od-pill--gray {
+	color: var(--text-muted);
+	background: var(--control-bg);
+}
+.oyna-dash .od-pill--orange {
+	color: #b8730f;
+	background: rgba(232, 163, 61, 0.16);
+}
+.oyna-dash .od-pill--blue {
+	color: #2f6fd0;
+	background: rgba(59, 125, 221, 0.14);
+}
+.oyna-dash .od-pill--green {
+	color: var(--od-good);
+	background: rgba(15, 157, 88, 0.12);
+}
+.oyna-dash .od-pill--red {
+	color: var(--od-bad);
+	background: rgba(226, 76, 76, 0.12);
+}
+
+/* Holatlar bo'yicha qisqacha jamlanma */
+.oyna-dash .od-statechips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.oyna-dash .od-statechip {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	background: var(--control-bg);
+	border-left: 3px solid var(--text-muted);
+	min-width: 150px;
+}
+
+.oyna-dash .od-statechip--orange {
+	border-left-color: #e8a33d;
+}
+.oyna-dash .od-statechip--blue {
+	border-left-color: #3b7ddd;
+}
+.oyna-dash .od-statechip--green {
+	border-left-color: #0f9d58;
+}
+.oyna-dash .od-statechip--red {
+	border-left-color: #e24c4c;
+}
+
+.oyna-dash .od-statechip__name {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.oyna-dash .od-statechip b {
+	font-size: var(--text-base);
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.oyna-dash .od-statechip__sum {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.oyna-dash .od-share {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+	position: relative;
+	min-width: 74px;
+}
+
+.oyna-dash .od-share i {
+	display: block;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--primary);
+	opacity: 0.5;
+	max-width: 46px;
+	flex: 0 0 auto;
+}
+
+/* ------------------------------------------- ko'rsatkichlar nisbati ro'yxati */
+
+.oyna-dash .od-mixlist {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-top: 10px;
+}
+
+.oyna-dash .od-mixrow {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 6px;
+	border-radius: 6px;
+	font-size: var(--text-sm);
+}
+
+.oyna-dash .od-mixrow:hover {
+	background: var(--control-bg);
+}
+
+.oyna-dash .od-mixrow i {
+	width: 9px;
+	height: 9px;
+	border-radius: 2px;
+	flex: 0 0 auto;
+}
+
+.oyna-dash .od-mixrow span {
+	color: var(--text-muted);
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-mixrow b {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- funnel */
+
+.oyna-dash .od-funnel {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-bottom: 6px;
+}
+
+.oyna-dash .od-funnel__head {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: var(--text-sm);
+	margin-bottom: 4px;
+}
+
+.oyna-dash .od-funnel__head b {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.oyna-dash .od-funnel__bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--control-bg);
+	overflow: hidden;
+}
+
+.oyna-dash .od-funnel__bar span {
+	display: block;
+	height: 100%;
+	background: #3b7ddd;
+	border-radius: 3px;
+}
+
+.oyna-dash .od-funnel__meta {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-top: 3px;
+}
+
+/* ---------------------------------------------------------------- charts */
+
+/* frappe-charts donut legendasini o'chirish.
+ * Kutubxona legendani SVG ichida QAT'IY 150px kataklarga joylaydi (x = 150 × n)
+ * va sig'magan matnni kesib tashlaydi ("Kassa togirlashga" -> "Kassa togirl…").
+ * Kenglikni sozlash imkoni yo'q, shuning uchun legenda o'chiriladi:
+ *   • xarajatlar bloki  -> pastdagi jadval (Modda | Summa | Ulush) uni almashtiradi;
+ *   • ko'rsatkichlar bloki -> .od-mixlist ro'yxati almashtiradi.
+ * Ikkalasi ham HTML bo'lgani uchun matn kesilmaydi va normal o'ralади. */
+.oyna-dash .od-chart--nolegend .chart-legend {
+	display: none;
+}
+
+.oyna-dash .od-chart {
+	margin: 4px -8px 0;
+}
+
+.oyna-dash .od-chart .chart-container {
+	padding-top: 0;
+}
+
+.oyna-dash .od-chart .chart-legend,
+.oyna-dash .od-chart .graph-stats-container {
+	font-size: var(--text-xs);
+}
+
+/* -------------------------------------------------------- empty/skeleton */
+
+.oyna-dash .od-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 30px 16px;
+	color: var(--text-muted);
+	font-size: var(--text-sm);
+	text-align: center;
+}
+
+.oyna-dash .od-empty svg {
+	opacity: 0.45;
+}
+
+.oyna-dash .od-fatal {
+	padding: 26px;
+	text-align: center;
+	color: var(--od-bad);
+	border: 1px dashed var(--border-color);
+	border-radius: var(--od-radius);
+}
+
+.oyna-dash .od-skeleton {
+	background: linear-gradient(
+		90deg,
+		var(--control-bg) 25%,
+		var(--fg-color) 37%,
+		var(--control-bg) 63%
+	);
+	background-size: 400% 100%;
+	animation: od-shimmer 1.3s ease infinite;
+	border-radius: var(--od-radius);
+	border: var(--od-border);
+	min-height: 118px;
+}
+
+.oyna-dash .od-skeleton--block {
+	min-height: 220px;
+}
+
+@keyframes od-shimmer {
+	0% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0 50%;
+	}
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1400px) {
+	.oyna-dash .od-card__value {
+		font-size: 20px;
+	}
+}
+
+@media (max-width: 1200px) {
+	.oyna-dash .od-kpis {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+	/* Ustunlar soni o'zgargani uchun span'lar to'g'ri kelmaydi */
+	.oyna-dash .od-card--span2,
+	.oyna-dash .od-card--span3,
+	.oyna-dash .od-card--span4 {
+		grid-column: auto;
+	}
+}
+
+@media (max-width: 991px) {
+	.oyna-dash .od-kpis {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.oyna-dash .od-row,
+	.oyna-dash .od-row:has(> .od-block--wide) {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.oyna-dash .od-stats {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 700px) {
+	.oyna-dash .od-cal__pop.is-open {
+		flex-direction: column;
+		position: fixed;
+		left: 8px;
+		right: 8px;
+		top: auto;
+		max-height: 80vh;
+		overflow-y: auto;
+	}
+	.oyna-dash .od-cal__presets {
+		flex-direction: row;
+		flex-wrap: wrap;
+		border-right: 0;
+		border-bottom: var(--od-border);
+		min-width: 0;
+	}
+	.oyna-dash .od-cal__presets-title {
+		flex: 1 0 100%;
+		padding-bottom: 2px;
+	}
+	.oyna-dash .od-cal__trigger {
+		width: 100%;
+		justify-content: space-between;
+	}
+	.oyna-dash .od-cal__label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}
+
+@media (max-width: 600px) {
+	.oyna-dash .od-toolbar {
+		position: static;
+	}
+	.oyna-dash .od-kpis {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.oyna-dash .od-field {
+		flex: 1 1 100%;
+	}
+	.oyna-dash .od-chipgroup {
+		width: 100%;
+		overflow-x: auto;
+	}
+	.oyna-dash .od-block {
+		padding: 14px;
+	}
+}

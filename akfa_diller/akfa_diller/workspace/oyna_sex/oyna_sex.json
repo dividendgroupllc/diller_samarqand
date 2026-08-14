@@ -1,0 +1,33 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"od_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Oyna sex</b></span>\",\"col\":12}},{\"id\":\"od_dash\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Boshqaruv paneli\",\"col\":4}},{\"id\":\"od_orders\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Zakazlar\",\"col\":4}},{\"id\":\"od_kassa\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Kassa\",\"col\":4}},{\"id\":\"od_spacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"od_rep_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Hisobotlar</b></span>\",\"col\":12}},{\"id\":\"od_dds\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"DDS\",\"col\":4}},{\"id\":\"od_kontragent\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Kontragent Otchet\",\"col\":4}},{\"id\":\"od_akt\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Akt Sverka\",\"col\":4}}]",
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "dashboard",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Oyna sex",
+ "links": [],
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna sex",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 1.0,
+ "shortcuts": [
+  {"color": "Blue",  "doctype": "Workspace Shortcut", "label": "Boshqaruv paneli", "link_to": "oyna-dashboard",     "type": "Page"},
+  {"color": "Grey",  "doctype": "Workspace Shortcut", "label": "Zakazlar",         "link_to": "Sales Order",        "type": "DocType", "doc_view": "List"},
+  {"color": "Grey",  "doctype": "Workspace Shortcut", "label": "Kassa",            "link_to": "Kassa",              "type": "DocType", "doc_view": "List"},
+  {"color": "Green", "doctype": "Workspace Shortcut", "label": "DDS",              "link_to": "DDS",                "type": "Report", "report_ref_doctype": "GL Entry"},
+  {"color": "Green", "doctype": "Workspace Shortcut", "label": "Kontragent Otchet","link_to": "Kontragent Otchet",  "type": "Report", "report_ref_doctype": "GL Entry"},
+  {"color": "Green", "doctype": "Workspace Shortcut", "label": "Akt Sverka",       "link_to": "Akt Sverka",         "type": "Report", "report_ref_doctype": "GL Entry"}
+ ],
+ "title": "Oyna sex"
+}

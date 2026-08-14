@@ -40,6 +40,12 @@ def _create_sales_invoice(doc):
 
 	si = make_sales_invoice(doc.name)
 	si.update_stock = 0  # services -> no stock movement on the invoice
+
+	# Kvadrat (m²) zakaz SARLAVHASIDA yuritiladi, standart mapper esa faqat
+	# tovar qatorlarini ko'chiradi — shuning uchun qo'lda o'tkazamiz, aks holda
+	# fakturada hajm haqida ma'lumot qolmaydi.
+	si.custom_jami_kvadrat = flt(doc.get("custom_jami_kvadrat"))
+
 	si.flags.ignore_permissions = True
 	si.insert(ignore_permissions=True)
 	si.submit()

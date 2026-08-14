@@ -6,6 +6,7 @@
 # Patches added in this section will be executed after doctypes are migrated
 
 akfa_diller.patches.oyna_sex_sales_order_setup
+akfa_diller.patches.oyna_sex_invoice_kvadrat
 akfa_diller.patches.oyna_sex_list_setup
 akfa_diller.patches.oyna_sex_list_columns
 akfa_diller.patches.backfill_custom_report_roles
