@@ -19,7 +19,7 @@ hujjatlardan yoki ular yaratgan GL yozuvlaridan olinadi. Shuning uchun:
 | Ko'rsatkich          | Manba                            | Valyuta      |
 |----------------------|----------------------------------|--------------|
 | Sotuv                | `Sales Invoice` (docstatus = 1)  | hujjatniki   |
-| Xarajatlar           | `GL Entry` — root_type = Expense | hisobniki    |
+| Xarajatlar           | `GL Entry` — root_type = Expense | UZS (P&L kursi)|
 | Mijoz qarzi          | `GL Entry` — Receivable          | hisobniki    |
 | Yetkazib b. qarzi    | `GL Entry` — Payable             | hisobniki    |
 | Kassa / bank         | `Mode of Payment Account` -> GL  | hisobniki    |
@@ -44,10 +44,15 @@ QABUL QILINGAN FARAZLAR (assumptions) — muhim!
    mijoz qarzida ham ko'rinmaydi. Sotuv raqamlari past ko'rinsa — birinchi
    navbatda zakazlar submit qilinganini tekshirish kerak.
 
-2. VALYUTA — KONVERTATSIYA YO'Q. Har bir summa O'Z valyutasida qaytariladi:
+2. VALYUTA. Umumiy qoida — konvertatsiya YO'Q, har bir summa O'Z valyutasida:
      • mijoz qarzi, so'm kassalari, bank      -> UZS (hisob valyutasi);
-     • xarajat, tannarx, ombor zaxirasi       -> USD (hisob valyutasi);
+     • tannarx, ombor zaxirasi                -> USD (hisob valyutasi);
      • sotuv                                  -> hujjat (Sales Invoice) valyutasi.
+
+   ISTISNO — XARAJATLAR va SOF FOYDA. Bular UZS da ko'rsatiladi: xarajat
+   hisoblari USD da yuritilgani uchun so'mdagi tushum bilan yonma-yon
+   solishtirib bo'lmasdi. Kurs ERPNext P&L hisobotidagi bilan bir xil olinadi
+   (davrning oxirgi sanasidagi bitta kurs) — qarang `_money_to_presentation`.
 
    Sotuv ataylab GL'dan emas, hujjatdan olinadi: `Sales - Os` tushum hisobi
    kompaniya valyutasida (USD) yuritiladi, shuning uchun GL'dan olinsa so'mdagi
@@ -320,6 +325,26 @@ def _money_out(bag):
 
 def _money_get(bag, currency):
 	return flt((bag or {}).get(currency))
+
+
+def _money_to_presentation(bag, to_date):
+	"""{valyuta: summa} → {UZS: summa} — barcha valyutalar bittaga keltiriladi.
+
+	Kurs ERPNext hisobotlaridagi bilan AYNAN bir xil olinadi: davrning oxirgi
+	sanasidagi bitta kurs (`erpnext/accounts/report/utils.py`,
+	`convert_to_presentation_currency`). Shu sababli «Xarajatlar» «Sof foyda»
+	kartasi va P&L hisoboti bilan mos tushadi — boshqa kurs ishlatilsa
+	"tushum − xarajat = sof foyda" tengligi buziladi.
+	"""
+	from erpnext.accounts.report.utils import convert
+
+	total = 0.0
+	for currency, amount in (bag or {}).items():
+		if currency == PNL_PRESENTATION_CURRENCY:
+			total += flt(amount)
+		else:
+			total += convert(flt(amount), PNL_PRESENTATION_CURRENCY, currency, to_date)
+	return {PNL_PRESENTATION_CURRENCY: total}
 
 
 def _margin(amount_bag, revenue_bag, currency):
@@ -1002,13 +1027,17 @@ def _get_overview(ctx):
 		# ham shu; yalpi foyda pastki qatorda qo'shimcha ma'lumot sifatida turadi.
 		# Xarajat = P&L «Total Expense (Debit)» — tannarx (COGS) ham ichida.
 		# Shunda "tushum − xarajat = sof foyda" tengligi ko'z bilan tekshiriladi.
+		# Xarajat hisoblari USD (hisob valyutasi) da yuritiladi, tushum esa
+		# hujjat valyutasida (UZS) — shuning uchun xarajat P&L bilan bir xil
+		# kursda UZS ga keltiriladi, aks holda ayirish ma'noga ega bo'lmaydi.
 		expense_accounts = [a.name for a in get_expense_accounts(ctx.company, include_cogs=True)]
-		now_opex = _gl_balance(ctx, expense_accounts, ctx.to_date, from_date=ctx.from_date)
-		prev_opex = _gl_balance(ctx, expense_accounts, ctx.prev_to, from_date=ctx.prev_from)
+		now_opex = _money_to_presentation(
+			_gl_balance(ctx, expense_accounts, ctx.to_date, from_date=ctx.from_date), ctx.to_date
+		)
+		prev_opex = _money_to_presentation(
+			_gl_balance(ctx, expense_accounts, ctx.prev_to, from_date=ctx.prev_from), ctx.prev_to
+		)
 
-		# Tushum hujjat valyutasida (UZS), xarajat esa hisob valyutasida (USD)
-		# bo'lishi mumkin — konvertatsiya yo'q, shuning uchun ayirish HAR BIR
-		# valyuta ichida alohida bajariladi.
 		# Sof foyda ERPNext P&L hisobotidan (presentation_currency = UZS) olinadi,
 		# shunda karta hisobotdagi «Profit for the year» bilan aynan mos keladi.
 		# Hisobot ishlamay qolsa — GL bo'yicha hisoblab, dashboard yiqilmaydi.
@@ -2232,6 +2261,11 @@ def _get_expenses(ctx):
 		_money_add(total, row.currency, row.amount)
 		entry["entries"] += cint(row.entries)
 
+	# Xarajatlar KPI kartasi kabi bu yerda ham hammasi UZS ga keltiriladi.
+	total = _money_to_presentation(total, ctx.to_date)
+	for entry in grouped.values():
+		entry["amount"] = _money_to_presentation(entry["amount"], ctx.to_date)
+
 	def weight(bag):
 		return sum(abs(v) for v in (bag or {}).values())
 
@@ -2256,7 +2290,9 @@ def _get_expenses(ctx):
 		)
 	categories.sort(key=lambda r: -sum(abs(e["amount"]) for e in r["amount"]))
 
-	prev_total = _gl_balance(ctx, names, ctx.prev_to, from_date=ctx.prev_from)
+	prev_total = _money_to_presentation(
+		_gl_balance(ctx, names, ctx.prev_to, from_date=ctx.prev_from), ctx.prev_to
+	)
 
 	# Trend
 	interval = _interval(ctx.from_date, ctx.to_date)
@@ -2281,6 +2317,11 @@ def _get_expenses(ctx):
 		key = str(row.bucket)
 		entry = trend.setdefault(key, {"label": key, "amount": {}})
 		_money_add(entry["amount"], row.currency, row.amount)
+
+	# Kurs davr oxiriga qarab olinadi — ERPNext hisobotlari ham davr ustunlarini
+	# bitta (yakuniy) kursda ko'rsatadi, shuning uchun trend jami bilan mos keladi.
+	for entry in trend.values():
+		entry["amount"] = _money_to_presentation(entry["amount"], ctx.to_date)
 
 	filled = _fill_series(trend, ctx.from_date, ctx.to_date, interval, {"amount": {}})
 
