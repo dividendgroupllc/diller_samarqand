@@ -159,6 +159,11 @@ after_migrate = ["akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_c
 scheduler_events = {
 	"cron": {
 		"*/5 * * * *": ["akfa_diller.akfa_diller.api.report_service_sync.sync_report_service"],
+		# Kunlik orqaga-qarash: manbada TAHRIRLANGAN/O'CHIRILGAN tranzaksiyalarni
+		# ERPNext hujjatlariga moslashtirish + 3-kunlik sync oynasidan kech
+		# kelganlarni yaratish (oxirgi 7 kun). Kechasi 02:30 da -- ish soatlari
+		# tashqarisida, API band bo'lmagan payt.
+		"30 2 * * *": ["akfa_diller.akfa_diller.api.report_service_sync.reverify_recent_transactions"],
 	},
 }
 

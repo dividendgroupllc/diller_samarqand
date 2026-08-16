@@ -232,7 +232,15 @@ def sync_report_service():
 
     fetch_failures = 0
 
-    for branch in settings.dealer_branches:
+    # Asosiy filiallar BIRINCHI ishlanadi (foydalanuvchi qarori 2026-08-16):
+    # transfer hujjatlari asosiy filial yozuviga ustuvorlik bilan yaratilsin.
+    # Bir sikl ichida asosiy feed'ning tranzaksiyalari oldin hujjat bo'ladi,
+    # filial nusxalari esa egizak-tekshiruvda o'tkaziladi. (Sikllar OSHA
+    # kechikkan asosiy yozuv uchun _handle_branch_transfer ichidagi almashtirish
+    # qoidasi ishlaydi.)
+    ordered_branches = sorted(settings.dealer_branches, key=lambda b: (0 if b.is_main else 1))
+
+    for branch in ordered_branches:
         try:
             rows = report_service_client.fetch_all_rows_for_dealer(base_url, token, branch.dealer_id, from_date, to_date)
         except Exception as e:
@@ -472,16 +480,22 @@ def _process_cid_group(cid, rows, settings, branch, branch_warehouse_map) -> str
     if row_type == "VOZVRAT_KLIENT":
         return _handle_sale(cid, rows, settings, branch, is_return=True)
     if row_type == "PRIXOD_BAZA":
-        if not branch.is_main:
-            # See module docstring: a sub-branch's PRIXOD_BAZA is the other half
-            # of a transfer the main branch's own feed already records -- skip to
-            # avoid double-counting the same physical stock movement.
-            return "skipped"
         # The main branch's 2 known bases ("BAZA (+998 __ ___ ____)", "Самарканд
         # База Катта Курган") already existed as real Suppliers on this site with
         # 91 real, manually-entered Purchase Invoices against them -- confirming
         # the business already books baza stock-arrival as a genuine purchase,
         # not a stock-only movement.
+        #
+        # 2026-08-16 (foydalanuvchi qarori): SUB-filiallar uchun ham xuddi shu.
+        # Avval sub-filialning XARITALANMAGAN PRIXOD_BAZA'si "asosiy feed baribir
+        # yozadi" degan taxmin bilan jimgina tashlanardi -- bu taxmin ikki marta
+        # noto'g'ri chiqdi: (1) 5 SD sub-filialning o'z BAZA identifikatorlari
+        # (keyin xaritalab to'g'irlandi), (2) Ishtixonning 2 ta chindan tashqi
+        # manbasi ("Ishtixon Akfa Centry" 97-58, to'g'ridan-to'g'ri "Samarqand-1"
+        # 97-2 -- iyulda 1854 dona jim yo'qolgan). Endi: filiallararo transfer
+        # bo'lsa XARITAGA yoziladi (yuqoridagi branch_warehouse tarmog'i uni
+        # transfer qiladi), xaritada YO'Q PRIXOD_BAZA esa -- haqiqiy tashqi
+        # yetkazuvchidan kirim, supplier avto-yaratilib xarid bo'lib yoziladi.
         return _handle_purchase(cid, rows, settings, branch)
 
     if row_type is None:
@@ -498,6 +512,26 @@ def _process_cid_group(cid, rows, settings, branch, branch_warehouse_map) -> str
         # deliberately scoped to exactly type=None, not "any unrecognized
         # type" (a non-null-but-unknown string still logs and skips below,
         # since that could be a real new type worth investigating specifically).
+        #
+        # 2026-08-16 aniqlashtirish: yuqoridagi qoida faqat HAQIQIY MIJOZLI
+        # qatorlar uchun tasdiqlangan edi. clientCid ham, clientName ham bo'sh
+        # type=None qator -- POS'ning ichki tuzatish yozuvi bo'lib chiqdi va
+        # API balans matematikasida KIRIM sifatida qatnashgan (jonli isbot:
+        # Mirbozor cid=11674, 750 dona -- sotuv qilib yuborilgani 1500 dona
+        # lik balans farqi bergan edi). Yo'nalishini qatorning o'zidan bilib
+        # bo'lmaydi -- hujjat yaratmaymiz, ko'rib-chiqishga log qoldiramiz.
+        first = rows[0]
+        if first.get("clientCid") is None and not (first.get("clientName") or "").strip():
+            title = f"Report Service sync: egasiz type=None qator, {branch.label} cid {cid}"
+            # har 5-daqiqalik sync oynada qolgan cid'ni qayta-qayta ko'radi --
+            # bitta cid uchun faqat bir marta log (42540 spam saboqlari)
+            if not frappe.db.exists("Error Log", {"method": title}):
+                frappe.log_error(
+                    title=title,
+                    message=f"{len(rows)} qator, jami qty={sum(r.get('qty') or 0 for r in rows):g}. "
+                    "Mijoz yo'q -- POS ichki tuzatishi bo'lishi mumkin, qo'lda ko'rib chiqiladi.",
+                )
+            return "skipped"
         return _handle_sale(cid, rows, settings, branch, is_return=False)
 
     frappe.log_error(
@@ -516,6 +550,8 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
 
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
+        if item_result.get("all_zero"):
+            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi (filial), {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
@@ -616,14 +652,44 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
                 break
 
     if twin_name:
-        # Har 5-daqiqalik sync bir xil twin'ni qayta-qayta ko'raveradi (ref'siz
-        # skip bo'lgani uchun) -- Error Log emas, oddiy logger, aks holda bitta
-        # doimiy twin kuniga ~300 ta xato yozuvini yaratadi (42540 saboqlari).
-        frappe.logger("report_service_sync").info(
-            f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin_name} "
-            f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
-        )
-        return "skipped"
+        # Foydalanuvchi qarori (2026-08-16): transferda ASOSIY filial yozuvi
+        # ustuvor. Agar hozir ASOSIY feed ishlanayotgan bo'lsa-yu, egizak SUB
+        # feed'dan yaratilgan bo'lsa (asosiy kechikib yozgan holat) -- sub
+        # hujjatini bekor qilib, asosiynikini yaratamiz: yakuniy holatda doim
+        # asosiy filial raqamlari turadi. Aks holda (sub feed ishlanayotgan
+        # bo'lsa yoki egizak allaqachon asosiydan bo'lsa) -- avvalgidek skip.
+        main_dealer_ids = {str(b.dealer_id) for b in settings.dealer_branches if b.is_main}
+        twin_ref = frappe.db.get_value("Stock Entry", twin_name, "custom_report_service_cid") or ""
+        twin_prefix = twin_ref.split(":")[0] if ":" in twin_ref else ""
+        if branch.is_main and twin_prefix and twin_prefix not in main_dealer_ids:
+            if _cancel_se_with_heal(twin_name, branch, settings):
+                frappe.logger("report_service_sync").info(
+                    f"asosiy-ustuvorlik: sub egizagi {twin_name} ({twin_ref}) bekor qilindi, "
+                    f"asosiy {branch.label} cid {cid} yoziladi"
+                )
+                # bekor qilingan sub hujjatning ref'i o'zida qoladi -- sub feed
+                # qayta ishlaganda exists-tekshiruv uni ko'rib skip qiladi,
+                # qayta-yaratish sikli bo'lmaydi.
+            else:
+                frappe.log_error(
+                    title=f"Report Service sync: sub egizagini bekor qilib bo'lmadi, {branch.label} cid {cid}",
+                    message=f"twin={twin_name} ({twin_ref}); asosiy hujjat yaratilmadi, keyingi siklda qayta uriniladi.",
+                )
+                return "skipped"
+        else:
+            # Foydalanuvchi qarori (2026-08-16): ikki tomon HAR XIL miqdor
+            # yozgan bo'lsa (asosiy 10 jo'natdi, filial 11 qabul qildi),
+            # transfer asosiy miqdorda qoladi, FARQ esa filial omboriga
+            # alohida tuzatish (Material Receipt/Issue) bilan kiritiladi --
+            # filialning haqiqatda sanagan soni ombor qoldig'ida aks etsin.
+            # Faqat qabul qiluvchi tomonda (reverse=True) va jami farq bo'lsa.
+            if reverse:
+                _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date)
+            frappe.logger("report_service_sync").info(
+                f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin_name} "
+                f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
+            )
+            return "skipped"
     config = StockEntryConfig(
         company=branch.company,
         source_warehouse=source,
@@ -647,6 +713,8 @@ def _handle_sale(cid, rows, settings, branch, is_return: bool) -> str:
 
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
+        if item_result.get("all_zero"):
+            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi, {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
@@ -684,6 +752,8 @@ def _handle_purchase(cid, rows, settings, branch) -> str:
 
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
+        if item_result.get("all_zero"):
+            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi (xarid), {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
@@ -714,17 +784,26 @@ def _resolve_items(rows, settings) -> Dict:
     for idx, row in enumerate(rows):
         qty = row.get("qty") or 0
         if not qty:
-            return {
-                "success": False,
-                "valid_items": [],
-                "errors": [{"row": idx, "error": f"qty=0 (productName={row.get('productName')})"}],
-            }
+            # 0-donali qator -- manba tizim artefakti (jonli misol 2026-08-14:
+            # S1 cid 271561, yolg'iz qatori qty=0, clientCid=None, amount=None).
+            # Avval bunday qator BUTUN tranzaksiyani yiqitardi: bitta buzuq
+            # qator tufayli 30-qatorli haqiqiy yuk ham yo'qolar, yolg'iz-qator
+            # holatida esa har 5-daqiqalik sync abadiy xato log yozar edi.
+            # 0 dona hech qanday ombor/moliya ta'siriga ega emas -- shunchaki
+            # tashlab, qolgan qatorlarni ishlaymiz.
+            continue
         candidates.append({
             "item_name": row.get("productName"),
             "qty": qty,
             "rate": (row.get("amount") or 0) / qty,
             "row_num": idx,
         })
+
+    if not candidates:
+        # hamma qatori 0 dona -- ishlanadigan hech narsa yo'q, jim o'tkazamiz
+        # ("success" bilan bo'sh ro'yxat emas: chaqiruvchilar bo'sh items bilan
+        # hujjat yaratishga urinmasligi uchun alohida belgi qaytaramiz).
+        return {"success": False, "valid_items": [], "errors": [], "all_zero": True}
 
     result = validate_items_exist(candidates)
     if result["errors"]:
@@ -853,3 +932,419 @@ def _finish(settings, status, log):
     settings.db_set("last_sync_status", status)
     settings.db_set("last_sync_log", (log or "")[:140000])
     frappe.db.commit()
+
+
+def _make_heal_receipt(item_code, warehouse, qty_needed, posting_date):
+    """Bekor qilish/qayta-yaratish jarayonida chiqqan NegativeStockError uchun
+    nuqtaviy tuzatish-kirim (asosiy heal bilan bir xil uslub: sana boshiga,
+    00:00:01)."""
+    rate = frappe.db.get_value("Bin", {"item_code": item_code, "valuation_rate": [">", 0]}, "valuation_rate")
+    se = frappe.new_doc("Stock Entry")
+    se.company = frappe.db.get_value("Warehouse", warehouse, "company")
+    se.stock_entry_type = "Material Receipt"
+    se.purpose = "Material Receipt"
+    se.set_posting_time = 1
+    se.posting_date = posting_date
+    se.posting_time = "00:00:01"
+    se.append("items", {
+        "item_code": item_code,
+        "qty": qty_needed,
+        "basic_rate": rate or 0,
+        "t_warehouse": warehouse,
+        "allow_zero_valuation_rate": 0 if rate else 1,
+    })
+    se.flags.ignore_permissions = True
+    se.insert()
+    se.submit()
+
+
+def _cancel_with_heal(doctype, name, max_attempts=30):
+    """Hujjatni bekor qilish; bekor qilish keyingi iste'molni minusga tushirsa,
+    yetishmovchilikni nuqtaviy kirim bilan yopib qayta urinadi. True=bekor bo'ldi."""
+    for _attempt in range(max_attempts):
+        try:
+            doc = frappe.get_doc(doctype, name)
+            if doc.docstatus != 1:
+                return True
+            doc.flags.ignore_permissions = True
+            doc.cancel()
+            frappe.db.commit()
+            return True
+        except Exception as e:
+            frappe.db.rollback()
+            m = _NEG_STOCK_RE.search(str(e))
+            if not m:
+                frappe.log_error(
+                    title=f"Report Service: bekor qilishda heal bo'lmaydigan xato ({name})",
+                    message=str(e)[:2000],
+                )
+                return False
+            try:
+                _make_heal_receipt(
+                    unquote(m.group(2)), unquote(m.group(3)), float(m.group(1)),
+                    frappe.db.get_value(doctype, name, "posting_date"),
+                )
+                frappe.db.commit()
+            except Exception as heal_err:
+                frappe.db.rollback()
+                frappe.log_error(
+                    title=f"Report Service: bekor-heal xatosi ({name})",
+                    message=f"{heal_err!r}\n\noriginal: {e}",
+                )
+                return False
+    return False
+
+
+def _cancel_se_with_heal(name, branch, settings):
+    return _cancel_with_heal("Stock Entry", name)
+
+
+def _process_with_heal_loop(cid, rows, settings, branch, wh_map):
+    """Sync'dagi bilan bir xil heal-retry + stall-guard sikli (qayta ishlatish uchun)."""
+    healed_signatures = {}
+    for _attempt in range(MAX_HEAL_ATTEMPTS):
+        try:
+            result = _process_cid_group(cid, rows, settings, branch, wh_map)
+            frappe.db.commit()
+            return result
+        except Exception as e:
+            frappe.db.rollback()
+            if "NegativeStockError" in type(e).__name__ or "needed in" in str(e):
+                sig_m = _NEG_STOCK_RE.search(str(e))
+                sig = (sig_m.group(1), sig_m.group(2), sig_m.group(3)) if sig_m else None
+                if sig is None or healed_signatures.get(sig, 0) < MAX_SAME_SHORTFALL_REPEATS:
+                    try:
+                        healed = _try_heal_negative_stock(str(e), branch, rows, settings.dealer_branches)
+                    except Exception as heal_err:
+                        frappe.db.rollback()
+                        healed = False
+                        frappe.log_error(
+                            title=f"Report Service qayta-tekshiruv: heal xatosi, {branch.label} cid {cid}",
+                            message=f"{heal_err!r}\n\noriginal: {e}",
+                        )
+                    if healed:
+                        if sig:
+                            healed_signatures[sig] = healed_signatures.get(sig, 0) + 1
+                        frappe.db.commit()
+                        continue
+            frappe.log_error(
+                title=f"Report Service qayta-tekshiruv: {branch.label} cid {cid}",
+                message=str(e)[:2000],
+            )
+            return "failed"
+    return "failed"
+
+
+MAX_REVERIFY_DELETIONS = 20  # bitta filial/bitta yurishda bekor qilinadigan
+# "manbada o'chirilgan" hujjatlar chegarasi -- API vaqtincha chala javob
+# qaytarsa ommaviy noto'g'ri bekor-qilishdan saqlaydi.
+
+REVERIFY_DAYS = 7
+
+
+def reverify_recent_transactions():
+    """Kunlik orqaga-qarash tekshiruvi (foydalanuvchi talabi 2026-08-16):
+    manba dasturda o'tmish tranzaksiyalar TAHRIRLANSA yoki O'CHIRILSA,
+    ERPNext hujjatlari ham moslashtiriladi.
+
+    Oxirgi REVERIFY_DAYS kun bo'yicha, har filial uchun:
+      - API'da bor, ERPNextda yo'q (3-kunlik sync oynasidan kech kelganlar
+        ham) -> yaratiladi;
+      - ikkalasida bor, lekin qator soni / jami dona / jami summa farq
+        qilsa (tahrirlangan) -> hujjat bekor qilinib qaytadan yaratiladi;
+      - ERPNextda bor, API'da endi yo'q (o'chirilgan) -> bekor qilinadi
+        (himoya chegarasi bilan).
+    """
+    settings = frappe.get_single("Report Service Settings")
+    if not settings.enabled:
+        return
+    base_url, token = report_service_client.get_token()
+    wh_map = _get_branch_warehouse_map()
+
+    to_date = today()
+    from_date = str(getdate(today()) - timedelta(days=REVERIFY_DAYS))
+
+    summary = []
+    ordered_branches = sorted(settings.dealer_branches, key=lambda b: (0 if b.is_main else 1))
+    for branch in ordered_branches:
+        try:
+            rows = report_service_client.fetch_all_rows_for_dealer(
+                base_url, token, branch.dealer_id, from_date, to_date
+            )
+        except Exception as e:
+            frappe.log_error(
+                title=f"Report Service qayta-tekshiruv: fetch xatosi ({branch.label})",
+                message=str(e)[:1000],
+            )
+            continue
+
+        groups = _group_by_cid(rows)
+        created = replaced = deleted = 0
+
+        for cid, cid_rows in groups.items():
+            ref = _external_ref(cid, branch)
+            doc = None
+            for dt in ("Stock Entry", "Sales Invoice", "Purchase Invoice"):
+                name = frappe.db.get_value(dt, {"custom_report_service_cid": ref}, "name")
+                if name:
+                    doc = (dt, name)
+                    break
+            if doc is None:
+                result = _process_with_heal_loop(cid, cid_rows, settings, branch, wh_map)
+                if result == "processed":
+                    created += 1
+                continue
+
+            dt, name = doc
+            if frappe.db.get_value(dt, name, "docstatus") != 1:
+                continue  # bekor qilingan (ongli qaror bilan) -- tegmaymiz
+
+            api_count = len([r for r in cid_rows if (r.get("qty") or 0)])
+            api_qty = sum(abs(r.get("qty") or 0) for r in cid_rows)
+            api_amount = sum(r.get("amount") or 0 for r in cid_rows)
+            child = {"Stock Entry": "Stock Entry Detail", "Sales Invoice": "Sales Invoice Item",
+                     "Purchase Invoice": "Purchase Invoice Item"}[dt]
+            agg = frappe.db.sql(
+                f"select count(*), coalesce(sum(abs(qty)), 0), coalesce(sum(abs(qty * rate)), 0) "
+                f"from `tab{child}` where parent = %s" if dt != "Stock Entry" else
+                f"select count(*), coalesce(sum(abs(qty)), 0), 0 from `tab{child}` where parent = %s",
+                (name,),
+            )[0]
+            doc_count, doc_qty, doc_amount = int(agg[0]), float(agg[1]), float(agg[2])
+
+            qty_ok = abs(doc_qty - api_qty) < 0.01
+            count_ok = doc_count == api_count
+            amount_ok = dt == "Stock Entry" or abs(doc_amount - abs(api_amount)) < 0.05
+            if qty_ok and count_ok and amount_ok:
+                continue
+
+            # tahrirlangan: bekor qilib, ref'ni bo'shatib, qaytadan yaratamiz
+            if not _cancel_with_heal(dt, name):
+                continue
+            frappe.db.set_value(dt, name, "custom_report_service_cid", None, update_modified=False)
+            frappe.db.commit()
+            result = _process_with_heal_loop(cid, cid_rows, settings, branch, wh_map)
+            replaced += 1
+            frappe.logger("report_service_sync").info(
+                f"qayta-tekshiruv: {ref} tahrirlangan -- {name} bekor, qayta yaratildi ({result}); "
+                f"API {api_count} qator/{api_qty:g} dona/{api_amount:g} vs hujjat {doc_count}/{doc_qty:g}/{doc_amount:g}"
+            )
+
+        # manbada o'chirilganlar
+        api_cids = {str(c) for c in groups}
+        prefix = f"{branch.dealer_id}:%"
+        candidates = []
+        for dt in ("Stock Entry", "Sales Invoice", "Purchase Invoice"):
+            candidates += [
+                (dt, r.name, r.custom_report_service_cid)
+                for r in frappe.get_all(
+                    dt,
+                    filters={
+                        "custom_report_service_cid": ["like", prefix],
+                        "docstatus": 1,
+                        "posting_date": ["between", [from_date, to_date]],
+                    },
+                    fields=["name", "custom_report_service_cid"],
+                )
+            ]
+        orphans = [c for c in candidates if c[2].split(":", 1)[1] not in api_cids]
+        if len(orphans) > MAX_REVERIFY_DELETIONS:
+            frappe.log_error(
+                title=f"Report Service qayta-tekshiruv: juda ko'p o'chirilgan-nomzod ({branch.label})",
+                message=f"{len(orphans)} ta hujjat API'da topilmadi (chegara {MAX_REVERIFY_DELETIONS}) -- "
+                "API chala javob bergan bo'lishi mumkin, hech narsa bekor qilinmadi.",
+            )
+        else:
+            for dt, name, ref in orphans:
+                if _cancel_with_heal(dt, name):
+                    deleted += 1
+                    frappe.logger("report_service_sync").info(
+                        f"qayta-tekshiruv: {ref} manbada o'chirilgan -- {name} bekor qilindi"
+                    )
+
+        if created or replaced or deleted:
+            summary.append(f"{branch.label}: yangi={created}, tahrir={replaced}, o'chirilgan={deleted}")
+
+    if summary:
+        frappe.log_error(
+            title="Report Service qayta-tekshiruv: o'zgarishlar",
+            message="\n".join(summary),
+        )
+
+
+def backfill_window(from_date, to_date, dealer_ids=None):
+    """Bir martalik orqa-to'ldirish: berilgan oynadagi barcha tranzaksiyalarni
+    (mavjudlari o'tkazilib) qayta ishlaydi. Deploy'dan keyin qo'lda chaqiriladi:
+
+        bench --site <sayt> execute \\
+            akfa_diller.akfa_diller.api.report_service_sync.backfill_window \\
+            --kwargs "{'from_date': '2026-08-01', 'to_date': '2026-08-09'}"
+
+    dealer_ids berilsa (ro'yxat, masalan [56, 57, 58, 63, 234]) faqat o'sha
+    filiallar; berilmasa hammasi. Idempotent: allaqachon hujjati borlar skip.
+    """
+    settings = frappe.get_single("Report Service Settings")
+    base_url, token = report_service_client.get_token()
+    wh_map = _get_branch_warehouse_map()
+    wanted = {str(d) for d in dealer_ids} if dealer_ids else None
+
+    ordered_branches = sorted(settings.dealer_branches, key=lambda b: (0 if b.is_main else 1))
+    for branch in ordered_branches:
+        if wanted is not None and str(branch.dealer_id) not in wanted:
+            continue
+        try:
+            rows = report_service_client.fetch_all_rows_for_dealer(
+                base_url, token, branch.dealer_id, str(from_date), str(to_date)
+            )
+        except Exception as e:
+            print(f"{branch.label}: fetch xatosi: {e}")
+            continue
+        groups = _group_by_cid(rows)
+        created = skipped = failed = 0
+        for cid, cid_rows in groups.items():
+            result = _process_with_heal_loop(cid, cid_rows, settings, branch, wh_map)
+            if result == "processed":
+                created += 1
+            elif result == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+        print(f"{branch.label}: yaratildi={created}, mavjud/o'tkazildi={skipped}, xato={failed}")
+
+
+def _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date):
+    """Egizak (asosiy tomon SE'si) bilan filialning o'z qabul yozuvi orasidagi
+    MIQDOR farqini filial omboriga tuzatish sifatida kiritadi (foydalanuvchi
+    qarori 2026-08-16: "asosiy 10 jo'natsa, filial 11 qabul qilsa -- transfer
+    10 bo'lsin, 1 tasi to'g'ri narxda alohida kirim bo'lsin; teskarisi ham").
+
+    items -- filial feed'idan resolve qilingan qatorlar ({item_code, qty, rate});
+    twin_name -- asosiy tomondan yaratilgan Stock Entry. Tuzatish hujjatlariga
+    filial tranzaksiyasining o'z ref'i yoziladi -- keyingi synclarda xuddi shu
+    tranzaksiya exists-tekshiruvda to'xtaydi (idempotent).
+    """
+    my_total = sum(i["qty"] for i in items)
+    twin_lines = frappe.db.sql(
+        "select item_code, sum(qty) from `tabStock Entry Detail` where parent = %s group by item_code",
+        (twin_name,),
+    )
+    twin_map = {code: float(q) for code, q in twin_lines}
+    twin_total = sum(twin_map.values())
+    if abs(my_total - twin_total) < 0.01:
+        return  # miqdor bir xil (sof nom-variant egizagi) -- tuzatish kerak emas
+
+    my_map = {}
+    for i in items:
+        my_map[i["item_code"]] = my_map.get(i["item_code"], 0) + i["qty"]
+
+    plus, minus = [], []
+    for code in set(my_map) | set(twin_map):
+        d = my_map.get(code, 0) - twin_map.get(code, 0)
+        if d > 0.009:
+            plus.append((code, d))
+        elif d < -0.009:
+            minus.append((code, -d))
+
+    def _make(entry_type, lines):
+        se = frappe.new_doc("Stock Entry")
+        se.company = branch.company
+        se.stock_entry_type = entry_type
+        se.purpose = entry_type
+        se.set_posting_time = 1
+        se.posting_date = posting_date
+        se.posting_time = "23:59:59"
+        if branch.cost_center:
+            se.cost_center = branch.cost_center
+        se.custom_report_service_cid = ref
+        for code, qty in lines:
+            rate = frappe.db.get_value("Bin", {"item_code": code, "valuation_rate": [">", 0]}, "valuation_rate")
+            row = {"item_code": code, "qty": qty, "basic_rate": rate or 0,
+                   "allow_zero_valuation_rate": 0 if rate else 1}
+            if entry_type == "Material Receipt":
+                row["t_warehouse"] = branch.warehouse
+            else:
+                row["s_warehouse"] = branch.warehouse
+            se.append("items", row)
+        se.flags.ignore_permissions = True
+        se.insert()
+        se.submit()
+        return se.name
+
+    made = []
+    if plus:
+        made.append(_make("Material Receipt", plus))
+    if minus:
+        made.append(_make("Material Issue", minus))
+    frappe.logger("report_service_sync").info(
+        f"qabul-farqi tuzatildi: {branch.label} {ref} -- filial {my_total:g} vs asosiy {twin_total:g}; "
+        f"tuzatish hujjatlari: {', '.join(made)}"
+    )
+
+
+# 0-narxli tovarlar uchun API'dan topilgan narxlar (2026-08-16 tekshiruvi:
+# joriy/30-06/eski suratlar + variant-nom va boshqa-filial manbalari).
+# 3 ta tovar hech qayerda narxsiz -- ro'yxatga kirmagan.
+_ZERO_VALUATION_PRICES = [
+    ("Samarqand -1 - SD", "Moskitnoe Kreplenie (Verh/nij) (7016) (Uz)", 0.12),
+    ("Samarqand -1 - SD", "Rezina EPDM CCEP0051", 2.02),
+    ("Samarqand -1 - SD", "T LAM (8017-Anthrazit Grey LL) Shtapik BKT 70 G32 (6.5m)", 17.71),
+    ("Samarqand -1 - SD", "LAM (7011-Sheffal Dub LL) Moskitniy 544 Alum", 8.75),
+    ("Samarqand -1 - SD", "(A) Kosa (V Dub Mokko) (N)", 25.33),
+    ("Ishtixon - K", "T LAM (7011-Alyuks LL) Shtapik BKT 70 G24 (6.5m)", 18.69),
+    ("Ishtixon - K", "(A) NEO ADC50 V0022 Qanot (Oq) (N)", 24.38),
+    ("Ishtixon - K", "(A) NEO ADC50 M0022 Urta (Oq) (N)", 24.38),
+    ("Ishtixon - K", "(A) NEO ADC50 G0004 Shtapik O (Oq) (N)", 7.39),
+    ("Mitan - K", "(A) NEO ADC50 G0003 Shtapik O (Oq)", 7.39),
+    ("Mitan - K", "(A) NEO ADC50 G0003 Shtapik O (SW306G)", 9.17),
+    ("Mitan - K", "(A) NEO ADC50 G0003 Shtapik O (Oq) (N)", 7.39),
+    ("Mitan - K", "Stanok Rezka IMPAK STORM", 530.0),
+    ("Mitan - K", "LAM (8017-Alyuks LL) NEO ADC50 G0004 Shtapik O", 11.34),
+    ("Mitan - K", "AKFA 7000 (Dub Mokko) Urta LAM (N)", 36.66),
+    ("Mitan - K", "T LAM (8017-Zol Dub) Shtapik BKT 70 G24R (6.5m)", 19.65),
+    ("Nurobod - SD", "TRIO 6000 (Zol Dub-S540) Kosa LAM (N)", 36.77),
+    ("Nurobod - SD", "(A) NEO ADC50 V0026 Balkon Urta Ispanilet (V Dub Mokko) (N)", 44.37),
+    ("Nurobod - SD", "AKFA 7000 (7011-Alyuks) Urta New LAM LL (N)", 36.66),
+    ("Nurobod - SD", "PENTA 6500 (9016-Dub Mokko-Oq) Kosa LAM (N)", 25.35),
+    ("Nurobod - SD", "PENTA 6500 (9016-Dub Mokko-Oq) Kanot LAM (N)", 27.99),
+    ("Nurobod - SD", "PENTA 6500 (9016-Dub Mokko-Oq) Urta LAM (N)", 26.75),
+]
+
+
+def apply_item_valuations():
+    """0-narxli tovarlarga API'dan topilgan narxlarni qo'yish (bir martalik,
+    deploy'dan keyin qo'lda):
+
+        bench --site <sayt> execute \\
+            akfa_diller.akfa_diller.api.report_service_sync.apply_item_valuations
+
+    Har (ombor, tovar) uchun joriy qoldiq bilan yangi valuation_rate'da Stock
+    Reconciliation yoziladi (miqdor o'zgarmaydi, faqat narx). Qoldiq 0 yoki
+    tovar mavjud bo'lmasa -- o'tkazib yuboriladi.
+    """
+    by_company = {}
+    for wh, item, rate in _ZERO_VALUATION_PRICES:
+        if not frappe.db.exists("Item", item):
+            print(f"o'tkazildi (item yo'q): {item}")
+            continue
+        qty = frappe.db.get_value("Bin", {"item_code": item, "warehouse": wh}, "actual_qty") or 0
+        if qty <= 0:
+            print(f"o'tkazildi (qoldiq {qty:g}): {item} @ {wh}")
+            continue
+        cur_rate = frappe.db.get_value("Bin", {"item_code": item, "warehouse": wh}, "valuation_rate") or 0
+        if cur_rate > 0.001:
+            print(f"o'tkazildi (narxi bor {cur_rate:g}): {item} @ {wh}")
+            continue
+        company = frappe.db.get_value("Warehouse", wh, "company")
+        by_company.setdefault(company, []).append((wh, item, float(qty), rate))
+
+    for company, lines in by_company.items():
+        sr = frappe.new_doc("Stock Reconciliation")
+        sr.company = company
+        sr.purpose = "Stock Reconciliation"
+        for wh, item, qty, rate in lines:
+            sr.append("items", {"item_code": item, "warehouse": wh, "qty": qty, "valuation_rate": rate})
+        sr.flags.ignore_permissions = True
+        sr.insert()
+        sr.submit()
+        frappe.db.commit()
+        print(f"NARX QO'YILDI: {sr.name} ({company}) -- {len(lines)} tovar")
