@@ -851,6 +851,9 @@ def _get_or_create_item(item_name, settings):
 
 
 def _get_or_create_customer(client_cid, client_name, phone, settings, branch):
+    # Supplier'dagi kabi: 140+ belgili nom Customer.name'ga sig'maydi (1406) --
+    # qidiruv va yaratish bitta kesilgan nom bilan.
+    client_name = ((client_name or "").strip())[:140] or None
     ref_client_cid = _external_client_cid(client_cid, branch) if client_cid is not None else None
     if ref_client_cid is not None:
         existing = frappe.db.get_value(
@@ -888,6 +891,10 @@ def _get_or_create_customer(client_cid, client_name, phone, settings, branch):
 
 
 def _get_or_create_supplier(client_cid, client_name, phone, settings, branch):
+    # Frappe hujjat nomi (Supplier.name = supplier_name) 140 belgidan oshsa 1406
+    # "Data too long for column 'name'" (jonli: Ishtixonning 4 cid'i, 2026-08-16).
+    # Qidiruv ham, yaratish ham bitta kesilgan nom bilan ishlashi shart.
+    client_name = ((client_name or "").strip())[:140] or None
     # Same dealer_id-scoping reasoning as _get_or_create_customer/_external_client_cid --
     # _handle_purchase is only ever reached for an is_main branch's own PRIXOD_BAZA rows
     # today (only one is_main branch exists), but once a second dealer network is
