@@ -793,7 +793,13 @@ def _resolve_items(rows, settings) -> Dict:
             # tashlab, qolgan qatorlarni ishlaymiz.
             continue
         candidates.append({
-            "item_name": row.get("productName"),
+            # Frappe'da hujjat nomi (Item.name = item_code) 140 belgidan oshsa
+            # "Data too long for column 'name'" bilan yiqiladi -- jonli misol
+            # 2026-08-16: Ishtixonning 4 ta cid'ida 140+ belgili productName
+            # bor edi. Nomni boshidayoq kesamiz: validate ham, yaratish ham
+            # bitta (kesilgan) nom bilan ishlaydi, aks holda yaratish kesilgan,
+            # qidiruv esa to'liq nom bilan yurib abadiy topolmay qolardi.
+            "item_name": ((row.get("productName") or "").strip())[:140],
             "qty": qty,
             "rate": (row.get("amount") or 0) / qty,
             "row_num": idx,
@@ -1245,7 +1251,7 @@ def _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date):
         elif d < -0.009:
             minus.append((code, -d))
 
-    def _make(entry_type, lines):
+    def _make(entry_type, lines, ref_value):
         se = frappe.new_doc("Stock Entry")
         se.company = branch.company
         se.stock_entry_type = entry_type
@@ -1255,7 +1261,7 @@ def _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date):
         se.posting_time = "23:59:59"
         if branch.cost_center:
             se.cost_center = branch.cost_center
-        se.custom_report_service_cid = ref
+        se.custom_report_service_cid = ref_value
         for code, qty in lines:
             rate = frappe.db.get_value("Bin", {"item_code": code, "valuation_rate": [">", 0]}, "valuation_rate")
             row = {"item_code": code, "qty": qty, "basic_rate": rate or 0,
@@ -1270,11 +1276,16 @@ def _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date):
         se.submit()
         return se.name
 
+    # custom_report_service_cid UNIQUE (jonli isbot 2026-08-16: IntegrityError
+    # 1062, 15 ta cid shu tufayli yiqilgan) -- ikkala tuzatish hujjatiga bir xil
+    # ref yozib bo'lmaydi. Birinchisi asl ref'ni oladi (idempotentlik shunga
+    # bog'langan: exists-tekshiruv aynan asl ref'ni qidiradi), ikkinchisiga
+    # ":q" suffiksi.
     made = []
     if plus:
-        made.append(_make("Material Receipt", plus))
+        made.append(_make("Material Receipt", plus, ref))
     if minus:
-        made.append(_make("Material Issue", minus))
+        made.append(_make("Material Issue", minus, ref if not plus else f"{ref}:q"))
     frappe.logger("report_service_sync").info(
         f"qabul-farqi tuzatildi: {branch.label} {ref} -- filial {my_total:g} vs asosiy {twin_total:g}; "
         f"tuzatish hujjatlari: {', '.join(made)}"
