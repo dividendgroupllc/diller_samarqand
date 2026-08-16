@@ -1055,10 +1055,17 @@ MAX_REVERIFY_DELETIONS = 20  # bitta filial/bitta yurishda bekor qilinadigan
 REVERIFY_DAYS = 7
 
 
-def reverify_recent_transactions():
+def reverify_recent_transactions(days=None):
     """Kunlik orqaga-qarash tekshiruvi (foydalanuvchi talabi 2026-08-16):
     manba dasturda o'tmish tranzaksiyalar TAHRIRLANSA yoki O'CHIRILSA,
     ERPNext hujjatlari ham moslashtiriladi.
+
+    `days` berilmasa REVERIFY_DAYS (kunlik jadval); bir martalik chuqur yurish
+    uchun qo'lda kattaroq qiymat berish mumkin, masalan iyuldan beri:
+
+        bench --site <sayt> execute \\
+            akfa_diller.akfa_diller.api.report_service_sync.reverify_recent_transactions \\
+            --kwargs "{'days': 47}"
 
     Oxirgi REVERIFY_DAYS kun bo'yicha, har filial uchun:
       - API'da bor, ERPNextda yo'q (3-kunlik sync oynasidan kech kelganlar
@@ -1075,7 +1082,7 @@ def reverify_recent_transactions():
     wh_map = _get_branch_warehouse_map()
 
     to_date = today()
-    from_date = str(getdate(today()) - timedelta(days=REVERIFY_DAYS))
+    from_date = str(getdate(today()) - timedelta(days=int(days) if days else REVERIFY_DAYS))
 
     summary = []
     ordered_branches = sorted(settings.dealer_branches, key=lambda b: (0 if b.is_main else 1))
