@@ -164,6 +164,10 @@ scheduler_events = {
 		# kelganlarni yaratish (oxirgi 7 kun). Kechasi 02:30 da -- ish soatlari
 		# tashqarisida, API band bo'lmagan payt.
 		"30 2 * * *": ["akfa_diller.akfa_diller.api.report_service_sync.reverify_recent_transactions"],
+		# Kassa (payments) sinxroni: soatlik, 0=0 bucket-tamoyili (oxirgi 3 kun).
+		"25 * * * *": ["akfa_diller.akfa_diller.api.payments_sync.sync_payments"],
+		# Kassa chuqur tekshiruvi: kechasi 03:10, oxirgi 30 kun 0=0.
+		"10 3 * * *": ["akfa_diller.akfa_diller.api.payments_sync.deep_check_payments"],
 	},
 }
 

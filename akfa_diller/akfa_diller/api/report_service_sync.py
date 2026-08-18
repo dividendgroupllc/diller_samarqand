@@ -1076,7 +1076,7 @@ def reverify_recent_transactions(days=None):
         (himoya chegarasi bilan).
     """
     settings = frappe.get_single("Report Service Settings")
-    if not settings.enabled:
+    if not settings.sync_enabled:
         return
     base_url, token = report_service_client.get_token()
     wh_map = _get_branch_warehouse_map()
