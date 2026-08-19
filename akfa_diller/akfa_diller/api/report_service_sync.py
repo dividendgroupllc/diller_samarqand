@@ -227,6 +227,7 @@ def sync_report_service():
     total_processed = 0
     total_skipped = 0
     total_groups = 0
+    total_reasons = {}
     errors = []
     log_lines = [f"Oyna: {from_date}..{to_date}"]
 
@@ -254,6 +255,11 @@ def sync_report_service():
         total_groups += len(groups)
         processed = 0
         skipped = 0
+        # "o'tkazib yuborildi" sabablari alohida sanaladi -- log'da bitta yig'ma
+        # son o'rniga nima uchun yozilmagani ko'rinsin (foydalanuvchi talabi
+        # 2026-08-19: "shularni logda to'g'ri ko'rsatilsin"). SKIP_LABELS'da
+        # har kodning o'zbekcha nomi bor.
+        reasons = {}
 
         # Process same-day stock INFLOWS before OUTFLOWS, regardless of the API's
         # own row order (which is roughly the real intraday sequence -- confirmed
@@ -290,6 +296,7 @@ def sync_report_service():
                         frappe.db.commit()
                     else:
                         skipped += 1
+                        reasons[result] = reasons.get(result, 0) + 1
                     break
                 except Exception as e:
                     # Undo any partial writes this specific cid made before failing
@@ -322,16 +329,34 @@ def sync_report_service():
                     frappe.log_error(title=f"Report Service sync: {branch.label} cid {cid}", message=str(e))
                     errors.append(f"{branch.label} cid {cid}: {e}")
                     skipped += 1
+                    reasons["xato"] = reasons.get("xato", 0) + 1
                     break
             else:
                 errors.append(f"{branch.label} cid {cid}: {MAX_HEAL_ATTEMPTS} marta tuzatishga urinildi, muvaffaqiyatsiz")
                 skipped += 1
+                reasons["xato"] = reasons.get("xato", 0) + 1
 
         total_processed += processed
         total_skipped += skipped
-        log_lines.append(f"{branch.label} (dealerId={branch.dealer_id}): {len(groups)} guruh, yaratildi={processed}, o'tkazib yuborildi={skipped}")
+        for k, v in reasons.items():
+            total_reasons[k] = total_reasons.get(k, 0) + v
+        log_lines.append(
+            f"{branch.label} (dealerId={branch.dealer_id}): {len(groups)} guruh, "
+            f"yaratildi={processed}, o'tkazib yuborildi={skipped}{_reason_text(reasons)}"
+        )
 
-    log_lines.append(f"JAMI: guruh={total_groups}, yaratildi={total_processed}, o'tkazib yuborildi={total_skipped}")
+    log_lines.append(
+        f"JAMI: guruh={total_groups}, yaratildi={total_processed}, "
+        f"o'tkazib yuborildi={total_skipped}{_reason_text(total_reasons)}"
+    )
+    diqqat = sum(total_reasons.get(k, 0) for k in ("xato", "tovar_topilmadi", "qolda_korish", "notanish_tur", "qayta_uriniladi"))
+    log_lines.append(
+        "DIQQAT talab qiladigan: " + (_reason_text(
+            {k: v for k, v in total_reasons.items()
+             if k in ("xato", "tovar_topilmadi", "qolda_korish", "notanish_tur", "qayta_uriniladi")},
+            prefix="",
+        ).strip() if diqqat else "yo'q -- hammasi joyida")
+    )
     if errors:
         log_lines.append("Xatolar (birinchi 20 tasi):")
         log_lines.extend(errors[:20])
@@ -351,6 +376,30 @@ def sync_report_service():
     _finish(settings, overall_status, "\n".join(log_lines))
 
     return {"status": overall_status.lower(), "processed": total_processed, "skipped": total_skipped}
+
+
+# _process_cid_group qaytaradigan sabab kodlari -> log'dagi o'zbekcha nomi.
+# Tartib log'da ham shu tartibda chiqadi: avval normal holatlar, keyin
+# diqqat talab qiladiganlari.
+SKIP_LABELS = [
+    ("allaqachon_bor", "allaqachon bor"),
+    ("egizak", "egizak (asosiy filial yozgan)"),
+    ("nol_dona", "0 dona"),
+    ("tovar_topilmadi", "TOVAR TOPILMADI"),
+    ("qolda_korish", "QO'LDA KO'RISH KERAK (egasiz qator)"),
+    ("notanish_tur", "NOTANISH TUR"),
+    ("qayta_uriniladi", "keyingi siklda qayta uriniladi"),
+    ("xato", "XATO"),
+]
+
+
+def _reason_text(reasons, prefix=" | "):
+    """{'allaqachon_bor': 700, 'egizak': 9} -> ' | allaqachon bor=700, egizak...=9'"""
+    parts = [f"{label}={reasons[code]}" for code, label in SKIP_LABELS if reasons.get(code)]
+    # ro'yxatda yo'q kod chiqib qolsa ham ko'rinsin (jim yo'qolmasin)
+    known = {code for code, _ in SKIP_LABELS}
+    parts += [f"{code}={n}" for code, n in reasons.items() if code not in known and n]
+    return (prefix + ", ".join(parts)) if parts else ""
 
 
 def _compute_window(last_synced_date):
@@ -531,32 +580,32 @@ def _process_cid_group(cid, rows, settings, branch, branch_warehouse_map) -> str
                     message=f"{len(rows)} qator, jami qty={sum(r.get('qty') or 0 for r in rows):g}. "
                     "Mijoz yo'q -- POS ichki tuzatishi bo'lishi mumkin, qo'lda ko'rib chiqiladi.",
                 )
-            return "skipped"
+            return "qolda_korish"
         return _handle_sale(cid, rows, settings, branch, is_return=False)
 
     frappe.log_error(
         title=f"Report Service sync: notanish type, {branch.label} cid {cid}",
         message=f"type={row_type!r}, {len(rows)} qator o'tkazib yuborildi.",
     )
-    return "skipped"
+    return "notanish_tur"
 
 
 def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, reverse: bool) -> str:
     ref = _external_ref(cid, branch)
     if frappe.db.exists("Stock Entry", {"custom_report_service_cid": ref}):
-        return "skipped"
+        return "allaqachon_bor"
 
     first = rows[0]
 
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
         if item_result.get("all_zero"):
-            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
+            return "nol_dona"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi (filial), {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
         )
-        return "skipped"
+        return "tovar_topilmadi"
 
     items = [
         {"item_code": r["item_code"], "qty": r["qty"], "rate": r["rate"]}
@@ -675,7 +724,7 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
                     title=f"Report Service sync: sub egizagini bekor qilib bo'lmadi, {branch.label} cid {cid}",
                     message=f"twin={twin_name} ({twin_ref}); asosiy hujjat yaratilmadi, keyingi siklda qayta uriniladi.",
                 )
-                return "skipped"
+                return "qayta_uriniladi"
         else:
             # Foydalanuvchi qarori (2026-08-16): ikki tomon HAR XIL miqdor
             # yozgan bo'lsa (asosiy 10 jo'natdi, filial 11 qabul qildi),
@@ -689,7 +738,7 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
                 f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin_name} "
                 f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
             )
-            return "skipped"
+            return "egizak"
     config = StockEntryConfig(
         company=branch.company,
         source_warehouse=source,
@@ -706,7 +755,7 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
 def _handle_sale(cid, rows, settings, branch, is_return: bool) -> str:
     ref = _external_ref(cid, branch)
     if frappe.db.exists("Sales Invoice", {"custom_report_service_cid": ref}):
-        return "skipped"
+        return "allaqachon_bor"
 
     first = rows[0]
     customer = _get_or_create_customer(first.get("clientCid"), first.get("clientName"), first.get("phone"), settings, branch)
@@ -714,12 +763,12 @@ def _handle_sale(cid, rows, settings, branch, is_return: bool) -> str:
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
         if item_result.get("all_zero"):
-            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
+            return "nol_dona"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi, {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
         )
-        return "skipped"
+        return "tovar_topilmadi"
 
     sign = -1 if is_return else 1
     items = [
@@ -745,7 +794,7 @@ def _handle_sale(cid, rows, settings, branch, is_return: bool) -> str:
 def _handle_purchase(cid, rows, settings, branch) -> str:
     ref = _external_ref(cid, branch)
     if frappe.db.exists("Purchase Invoice", {"custom_report_service_cid": ref}):
-        return "skipped"
+        return "allaqachon_bor"
 
     first = rows[0]
     supplier = _get_or_create_supplier(first.get("clientCid"), first.get("clientName"), first.get("phone"), settings, branch)
@@ -753,12 +802,12 @@ def _handle_purchase(cid, rows, settings, branch) -> str:
     item_result = _resolve_items(rows, settings)
     if not item_result["success"]:
         if item_result.get("all_zero"):
-            return "skipped"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
+            return "nol_dona"  # hamma qatori 0 dona -- jim o'tkazamiz, log shart emas
         frappe.log_error(
             title=f"Report Service sync: tovar topilmadi (xarid), {branch.label} cid {cid}",
             message="\n".join(e["error"] for e in item_result["errors"]),
         )
-        return "skipped"
+        return "tovar_topilmadi"
 
     items = [
         {"item_code": r["item_code"], "qty": r["qty"], "rate": r["rate"]}
@@ -1220,16 +1269,18 @@ def backfill_window(from_date, to_date, dealer_ids=None):
             print(f"{branch.label}: fetch xatosi: {e}")
             continue
         groups = _group_by_cid(rows)
-        created = skipped = failed = 0
+        created = failed = 0
+        reasons = {}
         for cid, cid_rows in groups.items():
             result = _process_with_heal_loop(cid, cid_rows, settings, branch, wh_map)
             if result == "processed":
                 created += 1
-            elif result == "skipped":
-                skipped += 1
-            else:
+                continue
+            if result == "failed":
                 failed += 1
-        print(f"{branch.label}: yaratildi={created}, mavjud/o'tkazildi={skipped}, xato={failed}")
+                result = "xato"
+            reasons[result] = reasons.get(result, 0) + 1
+        print(f"{branch.label}: yaratildi={created}, xato={failed}{_reason_text(reasons)}")
 
 
 def _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date):
