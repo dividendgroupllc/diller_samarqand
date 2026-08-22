@@ -20,7 +20,8 @@
   "section_status",
   "last_synced_date",
   "last_sync_status",
-  "last_sync_log"
+  "last_sync_log",
+  "closed_until"
  ],
  "fields": [
   {
@@ -128,6 +129,12 @@
    "fieldtype": "Long Text",
    "label": "Oxirgi sinxron logi",
    "read_only": 1
+  },
+  {
+   "fieldname": "closed_until",
+   "fieldtype": "Date",
+   "label": "Yopilgan sana (shu kundan oldingi davrga sinxron TEGMAYDI)",
+   "description": "Oy yopilgandan keyin shu sanani o'sha oy oxiriga qo'ying. Sinxron bu sanadan oldingi kunlarning hujjatlarini yaratmaydi ham, bekor qilmaydi ham -- farq topilsa Error Log'ga yozadi."
   }
  ],
  "index_web_pages_for_search": 1,

@@ -74,6 +74,26 @@ REQUIRED_SETTINGS_FIELDS = (
 # separately-onboarded Kattako'rg'on network), each has its own independent
 # clientCid numbering, so a bare client_cid key would risk two unrelated dealers'
 # internal branch identities colliding on the same small number.
+def _closed_until(settings=None):
+    """Oy yopilgan sana (Report Service Settings.closed_until). Shu kundan
+    OLDINGI davrga sinxron tegmaydi -- na hujjat yaratadi, na bekor qiladi
+    (foydalanuvchi talabi 2026-08-22: oy yopilgandan keyin raqamlar
+    o'zgarmasligi kerak)."""
+    settings = settings or frappe.get_single("Report Service Settings")
+    qiymat = getattr(settings, "closed_until", None)
+    return getdate(qiymat) if qiymat else None
+
+
+def _rows_closed(rows, chegara):
+    """Guruh yopilgan davrgami? Sana qatorning o'zidan olinadi."""
+    if not chegara or not rows:
+        return False
+    try:
+        return getdate(_parse_date(rows[0]["date"])) <= chegara
+    except Exception:
+        return False
+
+
 def _get_branch_warehouse_map() -> Dict[str, str]:
     rows = frappe.get_all("Report Service Branch Warehouse", fields=["dealer_id", "client_cid", "warehouse"])
     return {f"{row.dealer_id}:{row.client_cid}": row.warehouse for row in rows}
@@ -223,6 +243,7 @@ def sync_report_service():
         return {"status": "failed", "reason": "login error"}
 
     branch_warehouse_map = _get_branch_warehouse_map()
+    chegara = _closed_until(settings)
 
     total_processed = 0
     total_skipped = 0
@@ -281,6 +302,10 @@ def sync_report_service():
         )
 
         for cid, cid_rows in ordered_cids:
+            if _rows_closed(cid_rows, chegara):
+                skipped += 1
+                reasons["yopilgan_davr"] = reasons.get("yopilgan_davr", 0) + 1
+                continue
             healed_signatures = {}
             for attempt in range(MAX_HEAL_ATTEMPTS):
                 try:
@@ -388,6 +413,7 @@ SKIP_LABELS = [
     ("tovar_topilmadi", "TOVAR TOPILMADI"),
     ("qolda_korish", "QO'LDA KO'RISH KERAK (egasiz qator)"),
     ("notanish_tur", "NOTANISH TUR"),
+    ("yopilgan_davr", "yopilgan davr (tegilmadi)"),
     ("qayta_uriniladi", "keyingi siklda qayta uriniladi"),
     ("xato", "XATO"),
 ]
@@ -1129,9 +1155,16 @@ def reverify_recent_transactions(days=None):
         return
     base_url, token = report_service_client.get_token()
     wh_map = _get_branch_warehouse_map()
+    chegara = _closed_until(settings)
 
     to_date = today()
     from_date = str(getdate(today()) - timedelta(days=int(days) if days else REVERIFY_DAYS))
+    # yopilgan davrga umuman kirmaymiz -- oynaning o'zini qisqartiramiz
+    if chegara and getdate(from_date) <= chegara:
+        from_date = str(chegara + timedelta(days=1))
+        if getdate(from_date) > getdate(to_date):
+            print(f"Qayta-tekshiruv: butun oyna yopilgan davrda ({chegara}) -- o'tkazildi")
+            return
 
     summary = []
     ordered_branches = sorted(settings.dealer_branches, key=lambda b: (0 if b.is_main else 1))
@@ -1150,7 +1183,11 @@ def reverify_recent_transactions(days=None):
         groups = _group_by_cid(rows)
         created = replaced = deleted = 0
 
+        yopiq = 0
         for cid, cid_rows in groups.items():
+            if _rows_closed(cid_rows, chegara):
+                yopiq += 1
+                continue
             ref = _external_ref(cid, branch)
             doc = None
             for dt in ("Stock Entry", "Sales Invoice", "Purchase Invoice"):
@@ -1232,7 +1269,10 @@ def reverify_recent_transactions(days=None):
                     )
 
         if created or replaced or deleted:
-            summary.append(f"{branch.label}: yangi={created}, tahrir={replaced}, o'chirilgan={deleted}")
+            summary.append(
+                f"{branch.label}: yangi={created}, tahrir={replaced}, o'chirilgan={deleted}"
+                + (f", yopilgan davr={yopiq}" if yopiq else "")
+            )
 
     if summary:
         frappe.log_error(

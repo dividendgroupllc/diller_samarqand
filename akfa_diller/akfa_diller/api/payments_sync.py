@@ -144,6 +144,21 @@ def _resolve_account(kassa_map, did, label, currency):
     return acc
 
 
+def closed_until(settings=None):
+    """Oy yopilgan sana: shu kundan OLDINGI davrga sinxron tegmaydi
+    (foydalanuvchi talabi 2026-08-22). Bo'sh bo'lsa cheklov yo'q."""
+    settings = settings or frappe.get_single("Report Service Settings")
+    qiymat = getattr(settings, "closed_until", None)
+    return getdate(qiymat) if qiymat else None
+
+
+def _is_closed(pdate, chegara):
+    """pdate yopilgan davrgami? (chegara kunining O'ZI ham yopiq hisoblanadi)"""
+    if not chegara:
+        return False
+    return getdate(pdate) <= chegara
+
+
 def _log_once(title, message):
     if not frappe.db.exists("Error Log", {"method": title}):
         frappe.log_error(title=title, message=message)
@@ -170,6 +185,7 @@ def sync_payments(days=None, dealer_ids=None):
                   "Report Service Kassa Account'da birorta yozuv yo'q -- sinxron ishlamaydi.")
         return
 
+    chegara = closed_until(settings)
     base_url, token = report_service_client.get_token()
     to_date = today()
     from_date = str(getdate(today()) - timedelta(days=int(days) if days else PAYMENTS_WINDOW_DAYS))
@@ -185,6 +201,12 @@ def sync_payments(days=None, dealer_ids=None):
         except Exception as e:
             frappe.log_error(title=f"Payments sync: fetch xatosi ({branch.label})", message=str(e)[:800])
             continue
+
+        # API bergan HAQIQIY kunlik kurslarni (currencyRate) Company Currency
+        # Exchange'ga yozamiz -- shundan keyin hech kim hech qayerga kursni
+        # qo'lda kiritmaydi, ERPNext har hujjatga sanaga qarab o'zi qo'yadi
+        # (foydalanuvchi talabi 2026-08-22).
+        _store_api_rates(branch, rows)
 
         # bucket: (sana, kassa_label) -> qatorlar (DELETED chiqarib tashlangan)
         buckets = {}
@@ -222,7 +244,7 @@ def sync_payments(days=None, dealer_ids=None):
 
         # bucket ichida RECEIPT va PAYMENT aralash bo'lishi mumkin (bir registr)
 
-        rebuilt = skipped = 0
+        rebuilt = skipped = yopiq = 0
         for (pdate, kassa, bcur), brows in buckets.items():
             api_sum = round(sum(
                 (r.get("amount") or 0) * (-1 if (r.get("paymentType") or "").upper() == "PAYMENT" else 1)
@@ -242,6 +264,17 @@ def sync_payments(days=None, dealer_ids=None):
 
             if abs(api_sum - erp_sum) < 0.01:
                 skipped += 1
+                continue
+
+            if _is_closed(pdate, chegara):
+                # YOPILGAN DAVR: hujjatlarni o'zgartirmaymiz -- oy yopilgandan
+                # keyin manbada tahrir bo'lsa, buni buxgalter qo'lda hal qiladi.
+                _log_once(
+                    f"Payments: YOPILGAN davrda farq {branch.label} {kassa} {pdate}",
+                    f"API={api_sum}, ERPNext={erp_sum}, farq={round(api_sum - erp_sum, 2)}. "
+                    f"Yopilgan sana={chegara} -- hujjat o'zgartirilmadi, qo'lda ko'rib chiqing.",
+                )
+                yopiq += 1
                 continue
 
             _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
@@ -264,6 +297,12 @@ def sync_payments(days=None, dealer_ids=None):
         for okassa, odate, ocur in orphans:
             if (okassa, str(odate), ocur) in api_keys:
                 continue
+            if _is_closed(odate, chegara):
+                _log_once(
+                    f"Payments: YOPILGAN davrda yetim yozuv {branch.label} {okassa} {odate}",
+                    f"API'da bu kun uchun qator yo'q, lekin davr yopilgan ({chegara}) -- bekor qilinmadi.",
+                )
+                continue
             for name in frappe.get_all(
                 "Payment Entry",
                 filters={"docstatus": 1, "custom_rs_dealer": did, "custom_rs_kassa": okassa,
@@ -279,12 +318,78 @@ def sync_payments(days=None, dealer_ids=None):
                     frappe.log_error(title=f"Payments sync: yetim PE bekor bo'lmadi {name}", message=str(e)[:600])
             frappe.db.commit()
 
-        if rebuilt or removed:
-            summary.append(f"{branch.label}: {rebuilt} bucket qayta qurildi, {skipped} teng, yetim={removed}")
+        if rebuilt or removed or yopiq:
+            summary.append(
+                f"{branch.label}: {rebuilt} bucket qayta qurildi, {skipped} teng, "
+                f"yetim={removed}, yopilgan davr={yopiq}")
         time.sleep(2)
 
     if summary:
         frappe.logger("payments_sync").info("; ".join(summary))
+
+
+def _apply_row_rate(pe, row, company):
+    """Qatorning o'z kursini (currencyRate) Payment Entry'ga qo'yadi.
+
+    API kursni doim USD->UZS ko'rinishida beradi (masalan 11 850). Kitob
+    valyutasi USD bo'lgani uchun UZS tomoniga 1/kurs yoziladi. USD tomoniga
+    tegilmaydi (u yerda kurs 1).
+    """
+    rate = row.get("currencyRate")
+    if not rate:
+        return
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        return
+    if rate <= 0:
+        return
+    kitob = frappe.get_cached_value("Company", company, "default_currency")
+    if kitob != "USD":
+        return  # kitob dollarda bo'lmasa bu soddalashtirish o'rinli emas
+    teskari = 1.0 / rate
+    if (pe.paid_from_account_currency or "") == "UZS":
+        pe.source_exchange_rate = teskari
+    if (pe.paid_to_account_currency or "") == "UZS":
+        pe.target_exchange_rate = teskari
+
+
+def _store_api_rates(branch, rows):
+    """API qatorlaridagi currencyRate/currencyRateDate -> Company Currency Exchange.
+
+    Manba dastur kursni USD->UZS ko'rinishida beradi (masalan 11 850). Har
+    (kompaniya, kurs sanasi) uchun bitta yozuv yetadi -- teskari yo'nalish
+    (UZS->USD) kerak bo'lsa get_company_rate() 1/kurs qilib hisoblaydi.
+    """
+    from akfa_diller.akfa_diller.api.exchange import upsert_rate
+
+    company = branch.company
+    if not company:
+        return
+    kurslar = {}
+    for r in rows:
+        rate = r.get("currencyRate")
+        rdate = r.get("currencyRateDate") or r.get("date")
+        if not rate or not rdate:
+            continue
+        try:
+            iso = _parse_pay_date(rdate)
+        except Exception:
+            continue
+        # bir kunda bir necha qiymat kelsa oxirgisi (eng ko'p uchraydigani emas,
+        # aynan oxirgi qator) qoladi -- manba shu kunga shuni ishlatgan
+        kurslar[iso] = float(rate)
+    for iso, rate in sorted(kurslar.items()):
+        try:
+            upsert_rate(company, iso, "USD", "UZS", rate, source="API",
+                        note=f"{branch.label} feed'idan avtomatik")
+        except Exception as e:
+            frappe.log_error(
+                title=f"Kurs yozilmadi ({company} {iso})",
+                message=f"{e}\n\nkurs={rate}",
+            )
+    if kurslar:
+        frappe.db.commit()
 
 
 def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings):
@@ -377,6 +482,12 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
             pe.setup_party_account_field()
             pe.set_missing_values()
             pe.set_exchange_rate()
+            # API bergan HAQIQIY kurs (currencyRate) ustun: manba dastur shu
+            # qator uchun aynan shu kursni ishlatgan, biz ham shuni yozamiz.
+            # ERPNext o'zining kurs jadvalidan olgan qiymat bosib o'tiladi --
+            # aks holda so'mdagi yozuv boshqa kursda kitobga tushib, manba bilan
+            # farq berardi (foydalanuvchi talabi 2026-08-22).
+            _apply_row_rate(pe, r, company)
             # Ikki tomon valyutasi farq qilsa qarama-qarshi summa KURS bilan
             # hisoblanadi. LANGAR -- doim KASSA tomoni (qatorning o'z summasi):
             # Receive'da kassa = paid_to (received_amount), Pay'da kassa =

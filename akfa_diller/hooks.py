@@ -141,17 +141,53 @@ doctype_list_js = {"Sales Order": "public/js/sales_order_list.js"}
 # ---------------
 # Hook on document methods and events
 
+# Kompaniya bo'yicha valyuta kursi (Company Currency Exchange) hujjatlarga
+# AVTOMATIK qo'yiladi -- before_validate'da, chunki ERPNext kursni faqat bo'sh
+# bo'lganda o'zi to'ldiradi, ya'ni bizning qiymat saqlanib qoladi. Sinxron
+# yaratgan hujjatlar (custom_rs_dealer) va "kurs qo'lda kiritildi" belgisi
+# qo'yilganlar chetlab o'tiladi (exchange._skip).
+_EXCHANGE_HOOK = "akfa_diller.akfa_diller.api.exchange.set_conversion_rate"
+
 doc_events = {
 	"Sales Order": {
 		"on_submit": "akfa_diller.akfa_diller.api.oyna_order.on_sales_order_submit",
+		"before_validate": _EXCHANGE_HOOK,
 	},
 	"Report": {
 		"validate": "akfa_diller.akfa_diller.api.report_roles.ensure_report_roles",
 	},
+	# `currency` + `conversion_rate` maydoni bor BARCHA savdo/xarid hujjatlari
+	# (bazadan tekshirib chiqilgan ro'yxat -- birortasi qolib ketmasin)
+	"Sales Invoice": {"before_validate": _EXCHANGE_HOOK},
+	"Purchase Invoice": {"before_validate": _EXCHANGE_HOOK},
+	"Purchase Order": {"before_validate": _EXCHANGE_HOOK},
+	"Delivery Note": {"before_validate": _EXCHANGE_HOOK},
+	"Purchase Receipt": {"before_validate": _EXCHANGE_HOOK},
+	"Quotation": {"before_validate": _EXCHANGE_HOOK},
+	"Supplier Quotation": {"before_validate": _EXCHANGE_HOOK},
+	"POS Invoice": {"before_validate": _EXCHANGE_HOOK},
+	"Opportunity": {"before_validate": _EXCHANGE_HOOK},
+	"Dunning": {"before_validate": _EXCHANGE_HOOK},
+	# Payment Entry'da `currency` maydoni YO'Q -- kurs source/target_exchange_rate'da
+	"Payment Entry": {
+		"before_validate": "akfa_diller.akfa_diller.api.exchange.set_payment_entry_rates",
+	},
+	# Journal Entry'da kurs har SATRDA alohida
+	"Journal Entry": {
+		"before_validate": "akfa_diller.akfa_diller.api.exchange.set_journal_entry_rates",
+	},
+	# Oy oxiridagi valyuta qayta baholash: ERPNext o'zining UMUMIY kurs
+	# jadvalidan oladi -- kompaniya kursi bilan qayta hisoblaymiz
+	"Exchange Rate Revaluation": {
+		"before_validate": "akfa_diller.akfa_diller.api.exchange.set_revaluation_rates",
+	},
 }
 
 # Guarantee standard roles on all custom reports after every migrate/deploy.
-after_migrate = ["akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_custom_reports"]
+after_migrate = [
+	"akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_custom_reports",
+	"akfa_diller.akfa_diller.api.exchange.ensure_custom_fields",
+]
 
 # Scheduled Tasks
 # ---------------
