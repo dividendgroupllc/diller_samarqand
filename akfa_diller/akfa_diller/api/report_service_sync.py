@@ -84,6 +84,18 @@ def _closed_until(settings=None):
     return getdate(qiymat) if qiymat else None
 
 
+def _late_time():
+    """Kechikkan (reverify/almashtirish) yaratishda ishlatiladigan posting_time.
+
+    Barcha birinchi-o'tish hujjatlari 23:59:59 da, kun ichidagi tartib esa
+    creation bo'yicha. KEYIN yaratilgan hujjat creation'i eng yangi bo'lgani
+    uchun navbatning OXIRIGA tushadi -- o'sha kun iste'molchilari undan oldin
+    qolib, kirim "ko'rinmaydi" va katta soxta to'ldirish tug'iladi (2026-08-27
+    aniqlangan cho'kma-ildizi). 23:59:58 -- bir soniya oldin: kun jami
+    o'zgarmaydi, tartib to'g'rilanadi."""
+    return "23:59:58" if frappe.flags.get("akfa_late_recreate") else None
+
+
 def _rows_closed(rows, chegara):
     """Guruh yopilgan davrgami? Sana qatorning o'zidan olinadi."""
     if not chegara or not rows:
@@ -752,6 +764,7 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
         twin_ref = frappe.db.get_value("Stock Entry", twin_name, "custom_report_service_cid") or ""
         twin_prefix = twin_ref.split(":")[0] if ":" in twin_ref else ""
         if branch.is_main and twin_prefix and twin_prefix not in main_dealer_ids:
+            frappe.flags.akfa_late_recreate = True  # almashtirish = kech yaratish
             if _cancel_se_with_heal(twin_name, branch, settings):
                 frappe.logger("report_service_sync").info(
                     f"asosiy-ustuvorlik: sub egizagi {twin_name} ({twin_ref}) bekor qilindi, "
@@ -785,6 +798,7 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
         source_warehouse=source,
         target_warehouse=target,
         posting_date=_parse_date(first["date"]),
+        **({"posting_time": _late_time()} if _late_time() else {}),
         cost_center=branch.cost_center,
         external_ref_field="custom_report_service_cid",
         external_ref_value=ref,
@@ -821,6 +835,10 @@ def _handle_sale(cid, rows, settings, branch, is_return: bool) -> str:
         company=branch.company,
         warehouse=branch.warehouse,
         posting_date=_parse_date(first["date"]),
+        # faqat QAYTARIM (kirim) oldinga suriladi; oddiy sotuv (chiqim) kun
+        # oxirida qolgani xavfsiz -- 58s'da yaratsak o'sha kun kirimlaridan
+        # OLDIN tortib yuborib teskari muammo tug'dirardi
+        **({"posting_time": _late_time()} if (is_return and _late_time()) else {}),
         customer=customer,
         cost_center=branch.cost_center,
         update_stock=True,
@@ -857,6 +875,7 @@ def _handle_purchase(cid, rows, settings, branch) -> str:
 
     config = PurchaseInvoiceConfig(
         company=branch.company,
+        **({"posting_time": _late_time()} if _late_time() else {}),
         warehouse=branch.warehouse,
         posting_date=_parse_date(first["date"]),
         supplier=supplier,
@@ -1352,6 +1371,7 @@ def reverify_recent_transactions(days=None):
     settings = frappe.get_single("Report Service Settings")
     if not settings.sync_enabled:
         return
+    frappe.flags.akfa_late_recreate = True  # kech yaratish: 23:59:58 (tartib to'g'ri)
     base_url, token = report_service_client.get_token()
     wh_map = _get_branch_warehouse_map()
     chegara = _closed_until(settings)
