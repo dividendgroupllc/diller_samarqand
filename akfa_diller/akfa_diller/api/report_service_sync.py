@@ -175,6 +175,7 @@ def _try_heal_negative_stock(error_message, branch, cid_rows, all_branches) -> b
     if allow_zero:
         item_row["allow_zero_valuation_rate"] = 1
     se.append("items", item_row)
+    se.remarks = "AUTO-HEAL: manba minus-qoldiq davri uchun kirim"
     se.flags.ignore_permissions = True
 
     # Retry on lock contention specifically -- a scheduled sync run can overlap
@@ -1041,14 +1042,23 @@ def _make_heal_receipt(item_code, warehouse, qty_needed, posting_date):
         "t_warehouse": warehouse,
         "allow_zero_valuation_rate": 0 if rate else 1,
     })
+    se.remarks = "AUTO-HEAL: bekor qilish uchun vaqtinchalik kirim"
     se.flags.ignore_permissions = True
     se.insert()
     se.submit()
+    return se.name
 
 
-def _cancel_with_heal(doctype, name, max_attempts=30):
+def _cancel_with_heal(doctype, name, max_attempts=30, created_heals=None):
     """Hujjatni bekor qilish; bekor qilish keyingi iste'molni minusga tushirsa,
-    yetishmovchilikni nuqtaviy kirim bilan yopib qayta urinadi. True=bekor bo'ldi."""
+    yetishmovchilikni nuqtaviy kirim bilan yopib qayta urinadi. True=bekor bo'ldi.
+
+    created_heals (list) berilsa, shu sikl davomida yaratilgan tuzatish-kirim
+    nomlari unga yoziladi -- hujjat QAYTA YARATILGANDAN keyin bu kirimlar
+    ORTIQCHA bo'lib qoladi (qayta yaratilgan hujjat o'sha miqdorni qaytaradi)
+    va chaqiruvchi ularni olib tashlashga urinishi kerak. Aynan shu qaytarilmagan
+    kirimlar 2 oyda ~64 000 dona / 850 ming $ soxta ombor to'plagan edi
+    (foydalanuvchi topshirig'i 2026-08-27: "to'g'ri qo'shish kerak")."""
     for _attempt in range(max_attempts):
         try:
             doc = frappe.get_doc(doctype, name)
@@ -1068,10 +1078,12 @@ def _cancel_with_heal(doctype, name, max_attempts=30):
                 )
                 return False
             try:
-                _make_heal_receipt(
+                heal_name = _make_heal_receipt(
                     unquote(m.group(2)), unquote(m.group(3)), float(m.group(1)),
                     frappe.db.get_value(doctype, name, "posting_date"),
                 )
+                if created_heals is not None and heal_name:
+                    created_heals.append(heal_name)
                 frappe.db.commit()
             except Exception as heal_err:
                 frappe.db.rollback()
@@ -1121,6 +1133,131 @@ def _process_with_heal_loop(cid, rows, settings, branch, wh_map):
             )
             return "failed"
     return "failed"
+
+
+def _try_remove_heals(heal_names):
+    """Sikl davomida yaratilgan vaqtinchalik kirimlarni olib tashlashga urinish.
+    ERPNextning o'z NegativeStock tekshiruvi -- yakuniy himoya: olib tashlash
+    biror nuqtada qoldiqni minusga tushirsa, bekor qilish o'zi bloklanadi va
+    kirim joyida qoladi (keyin tungi reconcile_heals ko'rib chiqadi)."""
+    removed = 0
+    for hn in heal_names or []:
+        try:
+            doc = frappe.get_doc("Stock Entry", hn)
+            if doc.docstatus != 1:
+                continue
+            doc.flags.ignore_permissions = True
+            doc.cancel()
+            frappe.db.commit()
+            removed += 1
+        except Exception:
+            frappe.db.rollback()
+    return removed
+
+
+def reconcile_heals(limit=500, dry_run=0):
+    """AUTO-HEAL kirimlarining ORTIQCHA qismini olib tashlash (tungi jadvalda).
+
+    Muammo (2026-08-27 aniqlangan): tuzatish-kirimlar bir tomonlama edi --
+    yetishmovchilikda qo'shiladi, lekin keyin haqiqiy kirim (xarid/transfer)
+    kelganda yoki hujjat qayta yaratilganda QAYTARILMAYDI. 2 oyda ~78 000 dona
+    / 1.08 mln $ soxta ombor to'plangan (82% qayta qurish sikllaridan).
+
+    Algoritm: har (tovar, ombor) uchun ombor jurnalining suffiks-minimumi
+    hisoblanadi; har kirimning qancha qismini olib tashlasa ham qoldiq HECH
+    QAYERDA minusga tushmasligi aniqlanadi (oxirgisidan boshlab). To'liq
+    ortiqcha hujjat bekor qilinadi, qisman ortiqchasi kamaytirilgan miqdor
+    bilan qayta yoziladi. MANFIY QOLDIQQA YO'L QO'YILMAYDI (foydalanuvchi
+    talabi) -- har bekor qilishda ERPNextning o'z tekshiruvi yakuniy himoya.
+
+    Yopilgan davr (closed_until) ichidagi kirimlarga tegilmaydi.
+
+    bench --site <sayt> execute \
+        akfa_diller.akfa_diller.api.report_service_sync.reconcile_heals \
+        --kwargs "{'limit': 500, 'dry_run': 1}"
+    """
+    settings = frappe.get_single("Report Service Settings")
+    chegara = _closed_until(settings)
+
+    heal_rows = frappe.db.sql(
+        """select se.name, se.posting_date, d.item_code, d.t_warehouse, d.qty, d.basic_rate
+           from `tabStock Entry` se
+           join `tabStock Entry Detail` d on d.parent = se.name
+           where se.docstatus = 1 and se.stock_entry_type = 'Material Receipt'
+             and (se.custom_report_service_cid is null or se.custom_report_service_cid = '')
+             and se.posting_time = '00:00:01'""",
+        as_dict=True,
+    )
+    pairs = {}
+    for h in heal_rows:
+        if chegara and getdate(h.posting_date) <= chegara:
+            continue  # yopilgan davr -- tegilmaydi
+        pairs.setdefault((h.item_code, h.t_warehouse), {})[h.name] = h
+
+    bekor = qisqartirildi = 0
+    jami_rem_qty = jami_rem_val = 0.0
+    for (item, wh), heals in pairs.items():
+        if bekor + qisqartirildi >= int(limit):
+            break
+        sles = frappe.db.sql(
+            """select voucher_no, qty_after_transaction
+               from `tabStock Ledger Entry`
+               where is_cancelled = 0 and item_code = %s and warehouse = %s
+               order by posting_datetime, creation""",
+            (item, wh), as_dict=True,
+        )
+        suffmin = [0.0] * len(sles)
+        m = float("inf")
+        for i in range(len(sles) - 1, -1, -1):
+            m = min(m, sles[i].qty_after_transaction)
+            suffmin[i] = m
+        reja = []  # (heal, olib tashlanadigan qty)
+        ayirilgan = 0.0
+        for i in range(len(sles) - 1, -1, -1):
+            h = heals.get(sles[i].voucher_no)
+            if not h:
+                continue
+            slack = suffmin[i] - ayirilgan
+            rem = max(0.0, min(float(h.qty), slack))
+            if rem > 0.001:
+                reja.append((h, rem))
+                ayirilgan += rem
+        for h, rem in reja:
+            if bekor + qisqartirildi >= int(limit):
+                break
+            toliq = rem >= float(h.qty) - 0.001
+            if dry_run:
+                jami_rem_qty += rem
+                jami_rem_val += rem * (h.basic_rate or 0)
+                bekor += toliq
+                qisqartirildi += (not toliq)
+                continue
+            try:
+                doc = frappe.get_doc("Stock Entry", h.name)
+                if doc.docstatus != 1:
+                    continue
+                doc.flags.ignore_permissions = True
+                doc.cancel()
+                if not toliq:
+                    # qisman: qolgan (haqiqatan kerak) qismini qayta yozamiz
+                    _make_heal_receipt(item, wh, float(h.qty) - rem, h.posting_date)
+                frappe.db.commit()
+                jami_rem_qty += rem
+                jami_rem_val += rem * (h.basic_rate or 0)
+                bekor += toliq
+                qisqartirildi += (not toliq)
+            except Exception:
+                # jurnal holati hisoblagandan farq qildi (parallel yozuv) --
+                # bu juftlikning qolganiga tegmay keyingi tunga qoldiramiz
+                frappe.db.rollback()
+                break
+    rejim = "DRY-RUN (hech narsa o'zgarmadi)" if dry_run else "BAJARILDI"
+    natija = (f"reconcile_heals {rejim}: bekor={bekor}, qisqartirildi={qisqartirildi}, "
+              f"olib tashlandi={jami_rem_qty:,.0f} dona ({jami_rem_val:,.2f} $)")
+    print(natija)
+    frappe.logger("report_service_sync").info(natija)
+    return {"bekor": bekor, "qisqartirildi": qisqartirildi,
+            "dona": round(jami_rem_qty), "qiymat": round(jami_rem_val, 2)}
 
 
 MAX_REVERIFY_DELETIONS = 20  # bitta filial/bitta yurishda bekor qilinadigan
@@ -1225,11 +1362,17 @@ def reverify_recent_transactions(days=None):
                 continue
 
             # tahrirlangan: bekor qilib, ref'ni bo'shatib, qaytadan yaratamiz
-            if not _cancel_with_heal(dt, name):
+            sikl_heallari = []
+            if not _cancel_with_heal(dt, name, created_heals=sikl_heallari):
                 continue
             frappe.db.set_value(dt, name, "custom_report_service_cid", None, update_modified=False)
             frappe.db.commit()
             result = _process_with_heal_loop(cid, cid_rows, settings, branch, wh_map)
+            # Qayta yaratilgan hujjat miqdorni qaytardi -- bekor qilish paytida
+            # qo'yilgan vaqtinchalik kirimlar endi ORTIQCHA. Darhol olib
+            # tashlashga urinamiz; jurnal tartibi yo'l qo'ymasa (ERPNextning
+            # o'z tekshiruvi bloklaydi) tungi reconcile_heals oladi.
+            _try_remove_heals(sikl_heallari)
             replaced += 1
             frappe.logger("report_service_sync").info(
                 f"qayta-tekshiruv: {ref} tahrirlangan -- {name} bekor, qayta yaratildi ({result}); "

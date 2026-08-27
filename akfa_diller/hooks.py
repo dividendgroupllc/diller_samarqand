@@ -204,6 +204,9 @@ scheduler_events = {
 		"25 * * * *": ["akfa_diller.akfa_diller.api.payments_sync.sync_payments"],
 		# Kassa chuqur tekshiruvi: kechasi 03:10, oxirgi 30 kun 0=0.
 		"10 3 * * *": ["akfa_diller.akfa_diller.api.payments_sync.deep_check_payments"],
+		# AUTO-HEAL ortiqchasini olib tashlash: kechasi 04:00 (ombor haqiqiy
+		# bo'lishi uchun -- tuzatish-kirimlar endi bir tomonlama qolmaydi).
+		"0 4 * * *": ["akfa_diller.akfa_diller.api.report_service_sync.reconcile_heals"],
 	},
 }
 
