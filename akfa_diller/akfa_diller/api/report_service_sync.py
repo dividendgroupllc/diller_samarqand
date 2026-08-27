@@ -140,6 +140,20 @@ def _try_heal_negative_stock(error_message, branch, cid_rows, all_branches) -> b
     item_code = unquote(m.group(2))
     warehouse = unquote(m.group(3))
 
+    # BIR ZARBALI heal: shu cid shu tovardan jami qancha tortadi -- shuni
+    # kelajak minimal qoldig'iga solishtirib to'liq miqdorni bir kirimda qo'shamiz
+    draw = sum(
+        float(r.get("qty") or 0)
+        for r in cid_rows
+        if (r.get("productName") or "").strip()[:140] == item_code
+    )
+    try:
+        qty_needed = _one_shot_heal_qty(
+            qty_needed, draw, item_code, warehouse, _parse_date(cid_rows[0]["date"])
+        )
+    except Exception:
+        pass  # hisob yiqilsa -- eski xatti-harakat (reported qty)
+
     owning_branch = branch
     if warehouse != branch.warehouse:
         owning_branch = next((b for b in all_branches if b.warehouse == warehouse), None)
@@ -1023,6 +1037,37 @@ def _finish(settings, status, log):
     frappe.db.commit()
 
 
+def _min_future_balance(item_code, warehouse, from_date):
+    """Berilgan sanadan boshlab (shu kun ham) ombor jurnalidagi ENG KICHIK
+    qoldiq. Bir zarbali heal hisobida ishlatiladi: hujjat X dona tortsa,
+    kelajakning eng tor joyi M bo'lsa, kerakli to'ldirish = max(0, X - M) --
+    100 ta 2-donalik urinish o'rniga BITTA aniq kirim (2026-08-27 saboqlari:
+    "181 Qanot" 100 marta / 200 dona, soatlab isrof)."""
+    q = frappe.db.sql(
+        """select coalesce(min(qty_after_transaction), 0)
+           from `tabStock Ledger Entry`
+           where is_cancelled = 0 and item_code = %s and warehouse = %s
+             and posting_date >= %s""",
+        (item_code, warehouse, from_date),
+    )[0][0]
+    return float(q or 0)
+
+
+def _one_shot_heal_qty(reported_qty, draw_qty, item_code, warehouse, from_date):
+    """Bir zarbali to'ldirish miqdori: hujjatning shu tovardan jami tortishi
+    (draw_qty) minus kelajakdagi eng kichik qoldiq; hech bo'lmaganda xato
+    bildirgan miqdor. draw_qty noma'lum/0 bo'lsa reported_qty ishlatiladi."""
+    if not draw_qty or draw_qty <= 0:
+        return reported_qty
+    m = _min_future_balance(item_code, warehouse, from_date)
+    kerak = draw_qty - m
+    if kerak < reported_qty:
+        kerak = reported_qty
+    if kerak > draw_qty and reported_qty <= draw_qty:
+        kerak = max(draw_qty, reported_qty)
+    return kerak
+
+
 def _make_heal_receipt(item_code, warehouse, qty_needed, posting_date):
     """Bekor qilish/qayta-yaratish jarayonida chiqqan NegativeStockError uchun
     nuqtaviy tuzatish-kirim (asosiy heal bilan bir xil uslub: sana boshiga,
@@ -1078,10 +1123,27 @@ def _cancel_with_heal(doctype, name, max_attempts=30, created_heals=None):
                 )
                 return False
             try:
-                heal_name = _make_heal_receipt(
-                    unquote(m.group(2)), unquote(m.group(3)), float(m.group(1)),
-                    frappe.db.get_value(doctype, name, "posting_date"),
-                )
+                item_code = unquote(m.group(2))
+                warehouse = unquote(m.group(3))
+                reported = float(m.group(1))
+                posting_date = frappe.db.get_value(doctype, name, "posting_date")
+                # hujjat shu tovardan shu omborga qancha KIRITGAN edi -- bekor
+                # qilinsa shuncha yetishmasligi mumkin; bir zarbada hisoblaymiz
+                child = {"Stock Entry": ("Stock Entry Detail", "t_warehouse"),
+                         "Sales Invoice": ("Sales Invoice Item", "warehouse"),
+                         "Purchase Invoice": ("Purchase Invoice Item", "warehouse")}.get(doctype)
+                draw = 0.0
+                if child:
+                    draw = float(frappe.db.sql(
+                        f"""select coalesce(sum(abs(qty)), 0) from `tab{child[0]}`
+                            where parent = %s and item_code = %s and {child[1]} = %s""",
+                        (name, item_code, warehouse),
+                    )[0][0] or 0)
+                try:
+                    reported = _one_shot_heal_qty(reported, draw, item_code, warehouse, posting_date)
+                except Exception:
+                    pass
+                heal_name = _make_heal_receipt(item_code, warehouse, reported, posting_date)
                 if created_heals is not None and heal_name:
                     created_heals.append(heal_name)
                 frappe.db.commit()
