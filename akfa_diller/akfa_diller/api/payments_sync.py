@@ -77,6 +77,13 @@ def _fetch_payments(base_url, token, dealer_id, from_date, to_date):
             if r.status_code == 429:
                 time.sleep(10 * (attempt + 1))
                 continue
+            if r.status_code == 401:
+                # token eskirdi (uzoq backfill'da ~15 daqiqada o'ladi) --
+                # yangisini olib shu sahifani qayta so'raymiz (2026-08-28 saboq:
+                # 5 filial "fetch xatosi 401" bilan tortilmay qolgan edi)
+                base_url, token = report_service_client.get_token()
+                headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                continue
             r.raise_for_status()
             break
         payload = r.json()
@@ -173,6 +180,41 @@ def _parse_pay_date(s):
     return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
 
 
+def _account_amount(r, account):
+    """Qator summasini SCHOT valyutasiga keltiradi.
+
+    Foydalanuvchi qarori 2026-08-28: UZS schotlar YO'Q -- so'mdagi to'lov ham
+    o'sha kassa-labelning USD schotiga, qatorning O'Z kursi (currencyRate)
+    bilan dollarga o'girilib tushadi. Kurs bo'lmasa None -- qator sinxron
+    qilinmaydi (jimgina noto'g'ri summa yozishdan ko'ra to'xtab log qoldirgan
+    afzal). Valyuta schot bilan bir xil bo'lsa summa o'z holicha qaytadi."""
+    amount = round(r.get("amount") or 0, 2)
+    cur = _norm_currency((r.get("currency") or "").strip() or None)
+    acc_cur = frappe.get_cached_value("Account", account, "account_currency")
+    try:
+        rate = float(r.get("currencyRate") or 0)
+    except (TypeError, ValueError):
+        rate = 0
+    # MANBA XATOSI qoidasi (foydalanuvchi 2026-08-28): "USD" deb kelgan qator
+    # $500k dan katta bo'lsa -- bu aslida SO'M summa dollar maydoniga yozilgani
+    # (jonli misol: 10.07 S1 Перечислении $41,169,628 = 41.17 mln so'm ~ $3,474).
+    # Qatorning o'z kursida o'giriladi; bitta naqd/bank to'lovi $500k bo'lishi
+    # bu biznesda real emas.
+    if acc_cur == "USD" and abs(amount) >= 500000 and rate > 1000:
+        _log_once(
+            "Payments: so'm-xato qator kursda o'girildi",
+            f"amount={amount} kurs={rate} -> {round(amount / rate, 2)}; "
+            f"qator: {json.dumps(r, ensure_ascii=False)[:400]}")
+        return round(amount / rate, 2)
+    if not cur or cur == acc_cur:
+        return amount
+    if cur == "UZS" and acc_cur == "USD":
+        if rate <= 0:
+            return None
+        return round(amount / rate, 2)
+    return None
+
+
 def sync_payments(days=None, dealer_ids=None):
     """Soatlik: oxirgi PAYMENTS_WINDOW_DAYS kun. Qo'lda: days/dealer_ids bilan."""
     settings = frappe.get_single("Report Service Settings")
@@ -246,10 +288,21 @@ def sync_payments(days=None, dealer_ids=None):
 
         rebuilt = skipped = yopiq = 0
         for (pdate, kassa, bcur), brows in buckets.items():
-            api_sum = round(sum(
-                (r.get("amount") or 0) * (-1 if (r.get("paymentType") or "").upper() == "PAYMENT" else 1)
-                for r in brows
-            ), 2)
+            # summa SCHOT valyutasida yig'iladi (UZS qator -> USD schot: qatorning
+            # o'z kursi bilan; kurssiz qator yig'indidan chiqadi va sinxron ham
+            # uni yozmaydi -- ikkala tomon bir xil o'lchovda, 0=0 buzilmaydi)
+            b_account = _resolve_account(kassa_map, did, kassa,
+                                         (brows[0].get("currency") or "").strip() or None)
+            api_sum = 0.0
+            for r in brows:
+                amt = _account_amount(r, b_account)
+                if amt is None:
+                    _log_once(
+                        f"Payments sync: kurssiz UZS qator o'tkazildi ({branch.label} {kassa} {pdate})",
+                        f"qator: {json.dumps(r, ensure_ascii=False)[:400]}")
+                    continue
+                api_sum += amt * (-1 if (r.get("paymentType") or "").upper() == "PAYMENT" else 1)
+            api_sum = round(api_sum, 2)
 
             erp = frappe.db.sql(
                 """
@@ -416,11 +469,13 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
     from akfa_diller.akfa_diller.api.report_service_sync import _get_or_create_supplier
 
     for r in brows:
-        amount = round(r.get("amount") or 0, 2)
-        if abs(amount) < 0.005:
-            continue
         currency = (r.get("currency") or "").strip() or None
         account = _resolve_account(kassa_map, did, kassa, currency)
+        # summa SCHOT valyutasida (UZS -> USD kurs bilan; kurssiz qator yozilmaydi
+        # -- yuqoridagi taqqoslov yig'indisi ham xuddi shunday chiqarib tashlaydi)
+        amount = _account_amount(r, account)
+        if amount is None or abs(amount) < 0.005:
+            continue
         company = frappe.db.get_value("Account", account, "company")
         ptype = (r.get("paymentType") or "").upper()
         try:

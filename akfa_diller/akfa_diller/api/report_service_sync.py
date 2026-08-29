@@ -786,8 +786,13 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
             # alohida tuzatish (Material Receipt/Issue) bilan kiritiladi --
             # filialning haqiqatda sanagan soni ombor qoldig'ida aks etsin.
             # Faqat qabul qiluvchi tomonda (reverse=True) va jami farq bo'lsa.
+            # 2026-08-29 YANGI SIYOSAT (foydalanuvchi): tuzatish-hujjatlar
+            # YOZILMAYDI -- faqat harakat-hujjatlarning o'ziga ishonamiz
+            # (transfer asosiy miqdorda), farq esa faqat LOG bo'lib qoladi.
             if reverse:
-                _reconcile_receiver_delta(twin_name, items, branch, ref, posting_date)
+                frappe.logger("report_service_sync").info(
+                    f"qabul-farqi ANIQLANDI (hujjat yozilmadi, yangi siyosat): "
+                    f"{branch.label} cid {cid} twin={twin_name}")
             frappe.logger("report_service_sync").info(
                 f"kross-feed dublikat o'tkazildi: {branch.label} cid {cid} -> {twin_name} "
                 f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
@@ -963,6 +968,14 @@ def _get_or_create_customer(client_cid, client_name, phone, settings, branch):
     # Supplier'dagi kabi: 140+ belgili nom Customer.name'ga sig'maydi (1406) --
     # qidiruv va yaratish bitta kesilgan nom bilan.
     client_name = ((client_name or "").strip())[:140] or None
+    # POS'ning "anonim xaridor" qolipi ("Клиент (+998 00 000 000_)" va sh.o'.,
+    # clientCid=2/71 -- dasturning ichki o'tkinchi-xaridor kodi): har filialning
+    # O'Z "nomsiz xaridor" kartasiga yig'iladi (foydalanuvchi qarori 2026-08-29)
+    # -- qaysi filial qancha anonim savdo qilayotgani ko'rinib turadi, to'lovlar
+    # bilan qarz-balansi bir kartada netlanadi.
+    if client_name and client_name.startswith("Клиент (+998 00 000 000"):
+        client_name = f"{branch.label} — nomsiz xaridor"[:140]
+        client_cid = None  # anonim kod (2/71) haqiqiy identifikator emas
     ref_client_cid = _external_client_cid(client_cid, branch) if client_cid is not None else None
     if ref_client_cid is not None:
         existing = frappe.db.get_value(
