@@ -798,6 +798,19 @@ def _handle_branch_transfer(cid, rows, settings, branch, branch_warehouse, rever
                 f"({source} -> {target}, {total_qty} dona, {len(items)} qator, {posting_date})"
             )
             return "egizak"
+    # 2026-08-29 ASOSIY-QOIDA (foydalanuvchi): S1'dan chiqim faqat S1'ning O'Z
+    # rasxodi bilan yoziladi. Filial prixod yozgan-u S1 rasxod yozmagan bo'lsa
+    # (egizak topilmadi) -- hujjat YARATILMAYDI, faqat log. Aks holda S1
+    # langar-sanog'i bilan ERP orasida sun'iy Stock Adjustment to'planadi
+    # (2026-08-29 tahlili: 162 shunday hujjat, 24,106 dona, $340K).
+    if reverse:
+        s1_wh = next((b.warehouse for b in settings.dealer_branches
+                      if b.is_main and str(b.dealer_id) == "36"), None)
+        if s1_wh and source == s1_wh:
+            frappe.logger("report_service_sync").info(
+                f"asosiy-qoida: S1 rasxodsiz chiqim yozilmadi -- {branch.label} "
+                f"cid {cid} ({source} -> {target}, {total_qty} dona)")
+            return "asosiy_yozmagan"
     config = StockEntryConfig(
         company=branch.company,
         source_warehouse=source,

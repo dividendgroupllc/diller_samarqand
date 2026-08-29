@@ -96,7 +96,16 @@ jobs:
           FRAPPE_EOF
 
           echo "Restarting services..."
-          supervisorctl restart all
+          # 2026-08-29: "restart all" redis+webni ham to'xtatib, STOPPING'da
+          # qotgan worker (stopwaitsecs=1560) butun guruh startini bloklab sayt
+          # yiqilgan edi. Endi: redis'ga TEGILMAYDI, web alohida, workerlar esa
+          # stop -> qotganini kill -> navbat-tozalash -> start tartibida.
+          supervisorctl restart frappe-bench-web: || true
+          supervisorctl stop frappe-bench-workers: || true
+          sleep 5
+          pkill -9 -f "frappe worker" || true
+          su - frappe -c "cd ${{ env.BENCH_PATH }} && bench --site ${{ secrets.SITE_NAME }} execute akfa_diller.akfa_diller._qpurge.run" || true
+          supervisorctl start frappe-bench-workers: || true
           echo "Deployment updated successfully!"
           ENDSSH
 
