@@ -1374,6 +1374,13 @@ MAX_REVERIFY_DELETIONS = 20  # bitta filial/bitta yurishda bekor qilinadigan
 REVERIFY_DAYS = 7
 
 
+def reverify_deep_weekly():
+    """Haftalik chuqur qayta-tekshiruv (foydalanuvchi 2026-08-30: 1 oylik oyna):
+    kunlik 7-kunlik oynadan tashqarida qolgan eski retro-tahrir/o'chirishlarni
+    ham qamraydi. closed_until muhrlangani sayin oyna o'z-o'zidan qisqaradi."""
+    reverify_recent_transactions(days=31)
+
+
 def reverify_recent_transactions(days=None):
     """Kunlik orqaga-qarash tekshiruvi (foydalanuvchi talabi 2026-08-16):
     manba dasturda o'tmish tranzaksiyalar TAHRIRLANSA yoki O'CHIRILSA,
@@ -1467,7 +1474,23 @@ def reverify_recent_transactions(days=None):
             count_ok = doc_count == api_count
             amount_ok = dt == "Stock Entry" or abs(doc_amount - abs(api_amount)) < 0.05
             if qty_ok and count_ok and amount_ok:
-                continue
+                # 2026-08-30: jami-teng tahrirni ham ushlaymiz (kod-siljish kabi
+                # qator almashgan-u jami o'zgarmagan holat) -- qator darajasida
+                # (tovar, dona) solishtiruv. Resolve xato bersa eski xulosada
+                # qolamiz (jamilar teng = mos deb).
+                item_result = _resolve_items(cid_rows, settings)
+                if not item_result["success"]:
+                    continue
+                api_lines = Counter(
+                    (i["item_code"], round(abs(float(i["qty"])), 2))
+                    for i in item_result["valid_items"])
+                doc_lines = Counter(
+                    (r[0], round(abs(float(r[1] or 0)), 2))
+                    for r in frappe.db.sql(
+                        f"select item_code, qty from `tab{child}` where parent = %s",
+                        (name,)))
+                if api_lines == doc_lines:
+                    continue
 
             # tahrirlangan: bekor qilib, ref'ni bo'shatib, qaytadan yaratamiz
             sikl_heallari = []

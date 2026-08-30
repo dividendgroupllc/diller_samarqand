@@ -321,9 +321,12 @@ frappe.ui.form.on("Kassa", {
                 };
             }
 
+            // Oddiy operatsiyalar: faqat tanlangan kompaniyaga sozlangan
+            // (Mode of Payment Account qatori bor) usullar chiqadi.
             return {
+                query: "akfa_diller.akfa_diller.doctype.kassa.kassa.company_mode_of_payment_query",
                 filters: {
-                    enabled: 1
+                    company: frm.doc.company
                 }
             };
         });
@@ -355,15 +358,13 @@ frappe.ui.form.on("Kassa", {
                 };
             }
 
-            let filters = {
-                enabled: 1
+            // Bu tomon ham kompaniyaga sozlangan usullar bilan cheklanadi.
+            return {
+                query: "akfa_diller.akfa_diller.doctype.kassa.kassa.company_mode_of_payment_query",
+                filters: {
+                    company: frm.doc.company
+                }
             };
-
-            if (frm.doc.mode_of_payment) {
-                filters.name = ["!=", frm.doc.mode_of_payment];
-            }
-
-            return { filters: filters };
         });
     },
 

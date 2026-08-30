@@ -753,6 +753,38 @@ def get_transfer_mode_of_payments(company, source_mode_of_payment=None):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
+def company_mode_of_payment_query(doctype, txt, searchfield, start, page_len, filters):
+    """Oddiy (Приход/Расход) operatsiyalardagi "Способ оплаты" uchun query
+    (foydalanuvchi 2026-08-30): faqat tanlangan KOMPANIYAGA sozlangan usullar
+    -- ya'ni shu kompaniya uchun Mode of Payment Account qatori borlari.
+    Valyutasi ham ko'rsatiladi."""
+    filters = filters or {}
+    company = filters.get("company")
+    if not company:
+        return frappe.db.sql(
+            """select name from `tabMode of Payment`
+               where enabled = 1 and name like %(txt)s
+               order by name limit %(start)s, %(page_len)s""",
+            {"txt": f"%{txt}%", "start": start, "page_len": page_len})
+    return frappe.db.sql(
+        """
+        select mp.name, min(a.account_currency)
+        from `tabMode of Payment` mp
+        join `tabMode of Payment Account` mpa
+          on mpa.parent = mp.name and mpa.company = %(company)s
+          and ifnull(mpa.default_account, '') != ''
+        left join tabAccount a on a.name = mpa.default_account
+        where mp.enabled = 1 and mp.name like %(txt)s
+        group by mp.name
+        order by mp.name
+        limit %(start)s, %(page_len)s
+        """,
+        {"company": company, "txt": f"%{txt}%",
+         "start": start, "page_len": page_len})
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
 def conversion_mode_of_payment_query(doctype, txt, searchfield, start, page_len, filters):
     """Kassa konvertatsiyasidagi "Способ оплаты" Link maydonlari uchun query.
 
@@ -968,21 +1000,36 @@ def get_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
     if not company:
         return []
 
-    return frappe.db.sql("""
+    # Foydalanuvchi 2026-08-30: kompaniya CoA'sida maxsus "Xarajatlar" guruhi
+    # bo'lsa (SD/K'da biznes-xarajatlar daraxti shunday nomlangan), faqat shu
+    # guruh ICHIDAGI leaf hisoblar taklif qilinadi -- COGS/Stock Adjustment/
+    # standart texnik hisoblar aralashmaydi. Guruh topilmasa eski xatti-harakat.
+    daraxt_sharti = ""
+    guruh = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_name": "Xarajatlar", "is_group": 1},
+        ["lft", "rgt"], as_dict=True)
+    params = {
+        "company": company,
+        "txt": f"%{txt}%",
+        "start": start,
+        "page_len": page_len,
+    }
+    if guruh:
+        daraxt_sharti = "AND lft > %(lft)s AND rgt < %(rgt)s"
+        params.update({"lft": guruh.lft, "rgt": guruh.rgt})
+
+    return frappe.db.sql(f"""
         SELECT name, account_name
         FROM `tabAccount`
         WHERE company = %(company)s
         AND root_type = 'Expense'
         AND is_group = 0
+        {daraxt_sharti}
         AND (name LIKE %(txt)s OR account_name LIKE %(txt)s)
         ORDER BY name
         LIMIT %(start)s, %(page_len)s
-    """, {
-        "company": company,
-        "txt": f"%{txt}%",
-        "start": start,
-        "page_len": page_len
-    })
+    """, params)
 
 
 def validate_expense_account(expense_account, company):
