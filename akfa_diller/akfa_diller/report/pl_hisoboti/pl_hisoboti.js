@@ -1,4 +1,30 @@
 // PL Hisoboti — Akfa diller (dvigatel jazira_app'dan, dinamik xarajat-guruhlar).
+
+// PDF tugmasi — idempotent qo'yiladi (Frappe inner toolbar'ni qayta chizishi
+// mumkin, shuning uchun onload'da ham, jadval chizilganda ham tekshiriladi).
+function akfa_pl_pdf_button(report) {
+	if (!report || !report.page || !report.page.inner_toolbar) return;
+	report.page.inner_toolbar.removeClass("hidden-xs hidden-md");
+	if (report.page.inner_toolbar.find(".btn-akfa-pl-pdf").length) return;
+
+	const $btn = report.page.add_inner_button(__("PDF"), function () {
+		const filters = frappe.query_report.get_filter_values();
+		if (!filters.company) {
+			frappe.show_alert({ message: __("Avval kompaniyani tanlang"), indicator: "orange" });
+			return;
+		}
+		if (!filters.from_date || !filters.to_date) {
+			frappe.show_alert({ message: __("Avval sana oralig'ini tanlang"), indicator: "orange" });
+			return;
+		}
+		window.open(
+			"/api/method/akfa_diller.akfa_diller.report.pl_hisoboti.pl_hisoboti_pdf.generate_pl_pdf" +
+				"?filters=" + encodeURIComponent(JSON.stringify(filters))
+		);
+	});
+	if ($btn && $btn.addClass) $btn.addClass("btn-akfa-pl-pdf").addClass("btn-primary");
+}
+
 frappe.query_reports["PL Hisoboti"] = {
 	filters: [
 		{
@@ -36,6 +62,13 @@ frappe.query_reports["PL Hisoboti"] = {
 	tree: true,
 	name_field: "label",
 	initial_depth: 0,
+
+	onload: function (report) {
+		akfa_pl_pdf_button(report);
+	},
+	after_datatable_render: function () {
+		akfa_pl_pdf_button(frappe.query_report);
+	},
 
 	formatter: function (value, row, column, data, default_formatter) {
 		const rt = data ? data.row_type : null;
