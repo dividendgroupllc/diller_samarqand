@@ -1222,18 +1222,20 @@ def _zakaz_si_tannarx(so_names):
 	# zakazlarda tannarx ana shu MI'ning material-qiymatidan olinadi.
 	mi_rows = frappe.db.sql(
 		"""
-		SELECT so.name AS so, SUM(sed.amount) AS t
+		SELECT so.name AS so, se.name AS mi, SUM(sed.amount) AS t
 		FROM `tabSales Order` so
 		JOIN `tabStock Entry` se ON se.name = so.custom_material_issue
 		JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
 		WHERE so.name IN %(names)s AND se.docstatus = 1
-		GROUP BY so.name
+		GROUP BY so.name, se.name
 		""",
 		{"names": tuple(so_names)},
 		as_dict=True,
 	)
 	for r in mi_rows:
 		d = natija.setdefault(r.so, {"si_sana": None, "tannarx": 0.0})
+		# hujjat-izi: tannarx qaysi Material Issue'dan shakllangani
+		d["mi"] = r.mi
 		if flt(d["tannarx"]) <= 0.005:
 			d["tannarx"] = flt(r.t)
 	return natija
