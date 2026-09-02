@@ -176,18 +176,32 @@ def _row_hash(r):
     return hashlib.md5(key.encode()).hexdigest()[:12]
 
 
+def _kun_kursi(company, pdate):
+    """Kompaniya kurs-jadvalidan (API feed'i avto-to'ldiradi) USD->UZS kun-kursi."""
+    try:
+        from akfa_diller.akfa_diller.api.exchange import get_company_rate
+        return float(get_company_rate(company, "USD", "UZS", pdate) or 0)
+    except Exception:
+        return 0
+
+
 def _parse_pay_date(s):
     return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
 
 
-def _account_amount(r, account):
+def _account_amount(r, account, fallback_rate=0):
     """Qator summasini SCHOT valyutasiga keltiradi.
 
     Foydalanuvchi qarori 2026-08-28: UZS schotlar YO'Q -- so'mdagi to'lov ham
     o'sha kassa-labelning USD schotiga, qatorning O'Z kursi (currencyRate)
-    bilan dollarga o'girilib tushadi. Kurs bo'lmasa None -- qator sinxron
-    qilinmaydi (jimgina noto'g'ri summa yozishdan ko'ra to'xtab log qoldirgan
-    afzal). Valyuta schot bilan bir xil bo'lsa summa o'z holicha qaytadi."""
+    bilan dollarga o'girilib tushadi.
+
+    Foydalanuvchi qarori 2026-09-02 ("bironta ham qolib ketmasin"): qator
+    KURSSIZ kelsa (currencyRate=null -- jonli misol: 10.07 S1 Перечислении
+    125 mlrd so'm BAZA-postavchikka), `fallback_rate` -- O'SHA KUNNING kursi
+    (kurs-jadvali API feed'idan avto-to'ladi) bilan o'giriladi. Kun-kursi ham
+    topilmasa None -- qator sinxron qilinmadi, log qoladi (jimgina noto'g'ri
+    summa yozishdan ko'ra to'xtagan afzal)."""
     amount = round(r.get("amount") or 0, 2)
     cur = _norm_currency((r.get("currency") or "").strip() or None)
     acc_cur = frappe.get_cached_value("Account", account, "account_currency")
@@ -210,6 +224,13 @@ def _account_amount(r, account):
         return amount
     if cur == "UZS" and acc_cur == "USD":
         if rate <= 0:
+            if fallback_rate and float(fallback_rate) > 0:
+                _log_once(
+                    "Payments: kurssiz UZS qator KUN-KURSIDA o'girildi",
+                    f"amount={amount} kun-kursi={fallback_rate} -> "
+                    f"{round(amount / float(fallback_rate), 2)}; "
+                    f"qator: {json.dumps(r, ensure_ascii=False)[:400]}")
+                return round(amount / float(fallback_rate), 2)
             return None
         return round(amount / rate, 2)
     return None
@@ -293,9 +314,10 @@ def sync_payments(days=None, dealer_ids=None):
             # uni yozmaydi -- ikkala tomon bir xil o'lchovda, 0=0 buzilmaydi)
             b_account = _resolve_account(kassa_map, did, kassa,
                                          (brows[0].get("currency") or "").strip() or None)
+            kun_kursi = _kun_kursi(branch.company, pdate)
             api_sum = 0.0
             for r in brows:
-                amt = _account_amount(r, b_account)
+                amt = _account_amount(r, b_account, fallback_rate=kun_kursi)
                 if amt is None:
                     _log_once(
                         f"Payments sync: kurssiz UZS qator o'tkazildi ({branch.label} {kassa} {pdate})",
@@ -381,20 +403,20 @@ def sync_payments(days=None, dealer_ids=None):
         frappe.logger("payments_sync").info("; ".join(summary))
 
 
-def _apply_row_rate(pe, row, company):
+def _apply_row_rate(pe, row, company, fallback_rate=0):
     """Qatorning o'z kursini (currencyRate) Payment Entry'ga qo'yadi.
 
     API kursni doim USD->UZS ko'rinishida beradi (masalan 11 850). Kitob
     valyutasi USD bo'lgani uchun UZS tomoniga 1/kurs yoziladi. USD tomoniga
     tegilmaydi (u yerda kurs 1).
     """
-    rate = row.get("currencyRate")
-    if not rate:
-        return
     try:
-        rate = float(rate)
+        rate = float(row.get("currencyRate") or 0)
     except (TypeError, ValueError):
-        return
+        rate = 0
+    if rate <= 0:
+        # kurssiz qator -- kun-kursi (2026-09-02 qarori bilan izchil)
+        rate = float(fallback_rate or 0)
     if rate <= 0:
         return
     kitob = frappe.get_cached_value("Company", company, "default_currency")
@@ -468,12 +490,13 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
 
     from akfa_diller.akfa_diller.api.report_service_sync import _get_or_create_supplier
 
+    kun_kursi = _kun_kursi(branch.company, pdate)
     for r in brows:
         currency = (r.get("currency") or "").strip() or None
         account = _resolve_account(kassa_map, did, kassa, currency)
-        # summa SCHOT valyutasida (UZS -> USD kurs bilan; kurssiz qator yozilmaydi
-        # -- yuqoridagi taqqoslov yig'indisi ham xuddi shunday chiqarib tashlaydi)
-        amount = _account_amount(r, account)
+        # summa SCHOT valyutasida (UZS -> USD: qator kursi, kurssiz bo'lsa
+        # kun-kursi -- taqqoslov yig'indisi bilan BIR XIL qoida, 0=0 saqlanadi)
+        amount = _account_amount(r, account, fallback_rate=kun_kursi)
         if amount is None or abs(amount) < 0.005:
             continue
         company = frappe.db.get_value("Account", account, "company")
@@ -542,7 +565,7 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
             # ERPNext o'zining kurs jadvalidan olgan qiymat bosib o'tiladi --
             # aks holda so'mdagi yozuv boshqa kursda kitobga tushib, manba bilan
             # farq berardi (foydalanuvchi talabi 2026-08-22).
-            _apply_row_rate(pe, r, company)
+            _apply_row_rate(pe, r, company, fallback_rate=kun_kursi)
             # Ikki tomon valyutasi farq qilsa qarama-qarshi summa KURS bilan
             # hisoblanadi. LANGAR -- doim KASSA tomoni (qatorning o'z summasi):
             # Receive'da kassa = paid_to (received_amount), Pay'da kassa =
