@@ -707,6 +707,7 @@ def verify_payments(from_date, to_date):
             continue
 
         api_by_bucket = {}
+        kurs_kesh = {}
         for r in rows:
             if (r.get("status") or "").upper() == "DELETED":
                 continue
@@ -720,12 +721,28 @@ def verify_payments(from_date, to_date):
             else:
                 continue
             cur = (r.get("currency") or "").strip() or None
-            if not _resolve_account(kassa_map, did, kassa, cur):
+            account = _resolve_account(kassa_map, did, kassa, cur)
+            if not account:
+                key = (branch.label, kassa, cur)
+                unmapped[key] = unmapped.get(key, 0) + (r.get("amount") or 0)
+                continue
+            # 2026-09-02: sinxron bilan BIR XIL o'lchov — qator summasi schot
+            # valyutasiga keltiriladi (so'm-xato qoidasi + kun-kursi fallback).
+            # Ilgari xom qiymat solishtirilib, yolg'on-farqlar chiqardi
+            # (iyulda +42.3M "farq" — aslida ERPNext to'g'ri edi).
+            try:
+                pdate = _parse_pay_date(r.get("date"))
+            except Exception:
+                continue
+            if pdate not in kurs_kesh:
+                kurs_kesh[pdate] = _kun_kursi(branch.company, pdate)
+            amt = _account_amount(r, account, fallback_rate=kurs_kesh[pdate])
+            if amt is None:
                 key = (branch.label, kassa, cur)
                 unmapped[key] = unmapped.get(key, 0) + (r.get("amount") or 0)
                 continue
             bkey = (kassa, _norm_currency(cur))
-            api_by_bucket[bkey] = api_by_bucket.get(bkey, 0) + sign * (r.get("amount") or 0)
+            api_by_bucket[bkey] = api_by_bucket.get(bkey, 0) + sign * amt
 
         for (kassa, bcur), api_sum in api_by_bucket.items():
             erp = frappe.db.sql(

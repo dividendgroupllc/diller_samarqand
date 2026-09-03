@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-09-03 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "klaes_kod",
+  "klaes_nom",
+  "birlik",
+  "item"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "klaes_kod",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Klaes kodi",
+   "read_only": 1
+  },
+  {
+   "columns": 4,
+   "fieldname": "klaes_nom",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Klaes nomi",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "birlik",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Birlik",
+   "read_only": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Akfa item (bog'lang)",
+   "options": "Item"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-03 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Zakaz Import Tarjima",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

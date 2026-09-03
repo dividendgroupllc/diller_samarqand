@@ -1,0 +1,266 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-30 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_settings",
+  "company",
+  "warehouse",
+  "cost_center",
+  "column_break_1",
+  "zakaz_raqami",
+  "zakaz_sanasi",
+  "loyiha",
+  "section_import",
+  "xml_file",
+  "column_break_2",
+  "status",
+  "naming_series",
+  "section_pozitsiyalar",
+  "netto_uzs",
+  "column_break_p",
+  "materiallar_soni",
+  "aksessuar_summa_uzs",
+  "pozitsiyalar",
+  "section_tarjima",
+  "tarjima_izoh",
+  "tarjimasizlar",
+  "section_results",
+  "created_docs",
+  "column_break_3",
+  "external_ref",
+  "section_logs",
+  "error_log",
+  "import_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_settings",
+   "fieldtype": "Section Break",
+   "label": "Import sozlamalari"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Kompaniya",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "default": "Imzo franshiza"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Ombor",
+   "options": "Warehouse",
+   "description": "Materiallar shu ombordan chiqadi, tayyor mahsulot shu omborga kiradi. Bo'sh bo'lsa import o'zi yaratadi/tanlaydi."
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "zakaz_raqami",
+   "fieldtype": "Data",
+   "label": "Zakaz raqami",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "zakaz_sanasi",
+   "fieldtype": "Date",
+   "label": "Zakaz sanasi",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "loyiha",
+   "fieldtype": "Data",
+   "label": "Loyiha raqami",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_import",
+   "fieldtype": "Section Break",
+   "label": "Fayl"
+  },
+  {
+   "fieldname": "xml_file",
+   "fieldtype": "Attach",
+   "label": "Zakaz XML fayli (Klaes)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nProcessing\nProcessed\nFailed",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "ZKI-.YYYY.-.#####",
+   "default": "ZKI-.YYYY.-.#####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "section_pozitsiyalar",
+   "fieldtype": "Section Break",
+   "label": "Zakaz mazmuni"
+  },
+  {
+   "fieldname": "netto_uzs",
+   "fieldtype": "Float",
+   "label": "Netto (UZS)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_p",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "materiallar_soni",
+   "fieldtype": "Int",
+   "label": "Material turlari soni",
+   "read_only": 1
+  },
+  {
+   "fieldname": "aksessuar_summa_uzs",
+   "fieldtype": "Float",
+   "label": "Aksessuar summasi (UZS)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pozitsiyalar",
+   "fieldtype": "Table",
+   "label": "Pozitsiyalar",
+   "options": "Zakaz Import Pozitsiya",
+   "read_only": 1
+  },
+  {
+   "collapsible": 0,
+   "depends_on": "eval:(doc.tarjimasizlar || []).length",
+   "fieldname": "section_tarjima",
+   "fieldtype": "Section Break",
+   "label": "Tarjimasiz Klaes kodlari"
+  },
+  {
+   "depends_on": "eval:(doc.tarjimasizlar || []).length",
+   "fieldname": "tarjima_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin-bottom:6px'>Quyidagi kodlar uchun Akfa savdo itemi topilmadi. Har qatorda <b>Akfa item</b>ni tanlab, hujjatni saqlang — «Import qilish» bosilganda bog'lovlar Klaes Tarjima lug'atiga avtomatik muhrlanadi va keyingi importlarda bu kodlar boshqa chiqmaydi. Bo'sh qoldirilgan kod Klaes-kodicha ochiladi.</div>"
+  },
+  {
+   "fieldname": "tarjimasizlar",
+   "fieldtype": "Table",
+   "label": "Kod → Item bog'lash",
+   "options": "Zakaz Import Tarjima"
+  },
+  {
+   "fieldname": "section_results",
+   "fieldtype": "Section Break",
+   "label": "Natijalar"
+  },
+  {
+   "fieldname": "created_docs",
+   "fieldtype": "Long Text",
+   "label": "Yaratilgan hujjatlar",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "external_ref",
+   "fieldtype": "Data",
+   "label": "External Ref (zakaz kaliti)",
+   "read_only": 1,
+   "unique": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "section_logs",
+   "fieldtype": "Section Break",
+   "label": "Loglar",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Long Text",
+   "label": "Xatolar",
+   "read_only": 1
+  },
+  {
+   "fieldname": "import_log",
+   "fieldtype": "Long Text",
+   "label": "Import jurnali",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Zakaz Import",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "zakaz_raqami",
+ "track_changes": 1
+}

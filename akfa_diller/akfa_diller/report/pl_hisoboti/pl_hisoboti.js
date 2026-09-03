@@ -50,6 +50,17 @@ frappe.query_reports["PL Hisoboti"] = {
 			reqd: 1,
 		},
 		{
+			fieldname: "cost_center",
+			label: __("Cost Center (filial)"),
+			fieldtype: "Link",
+			options: "Cost Center",
+			get_query: function () {
+				return {
+					filters: { company: frappe.query_report.get_filter_value("company") },
+				};
+			},
+		},
+		{
 			fieldname: "periodicity",
 			label: __("Davr"),
 			fieldtype: "Select",

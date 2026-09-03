@@ -279,6 +279,7 @@ class BiznesDashboard {
 		}
 
 		this.state.company = this.meta.default;
+		this.apply_saved_filial();
 		this.render_filters();
 		this.ready = true;
 		this.apply_view();
@@ -304,6 +305,15 @@ class BiznesDashboard {
 			},
 			extra || {}
 		);
+	}
+
+	/** Kompaniya uchun saqlangan filial-tanlovni holatga tiklaydi. */
+	apply_saved_filial() {
+		const branches = this.company_meta().branches || [];
+		const saqlangan = bd_saqlash.get("bd:filial:" + this.state.company, "");
+		const b = branches.find((x) => x.cost_center === saqlangan);
+		this.state.cost_center = b ? b.cost_center : null;
+		this.state.warehouse = b ? b.warehouse : null;
 	}
 
 	company_meta() {
@@ -439,9 +449,15 @@ class BiznesDashboard {
 	}
 
 	/** Ko'rinishga qarab toolbar/kpi zonalarini moslash. */
+	/** Toolbar ichidagi davr-kalendari faqat Umumiy panelda ko'rinadi —
+	 *  toolbar qayta chizilganda (filial/kompaniya almashganda) ham. */
+	sync_toolbar_view() {
+		this.$toolbar.find(".od-cal").toggle(this.state.view === "umumiy");
+	}
+
 	apply_view() {
 		const maxsus = this.state.view !== "umumiy";
-		this.$toolbar.find(".od-cal").toggle(!maxsus);
+		this.sync_toolbar_view();
 		this.$kpis.toggle(!maxsus);
 		this.$context.toggle(!maxsus);
 		if (!maxsus) {
@@ -476,8 +492,29 @@ class BiznesDashboard {
 					.join("")}</div>`
 			: "";
 
+		// Filial-chiplar (faqat trade-kompaniyalar; Report Service Dealer Branch)
+		const branches = this.company_meta().branches || [];
+		const filial_chips = branches.length
+			? `<div class="od-toolbar__row bd-filiallar">
+					<span class="bd-filiallar__label">${__("Filial")}</span>
+					<button type="button" class="bd-chip${
+						!this.state.cost_center ? " is-active" : ""
+					}" data-filial="">${__("Hammasi")}</button>
+					${branches
+						.map(
+							(b) => `<button type="button" class="bd-chip${
+								b.cost_center === this.state.cost_center ? " is-active" : ""
+							}" data-filial="${od.esc(b.cost_center)}" data-wh="${od.esc(
+								b.warehouse || ""
+							)}">${od.esc(b.label)}</button>`
+						)
+						.join("")}
+				</div>`
+			: "";
+
 		this.$toolbar.html(`
 			${chips}
+			${filial_chips}
 			<div class="od-toolbar__row">
 				<div class="od-cal" data-role="daterange">
 					<button type="button" class="od-cal__trigger" title="${__(
@@ -493,7 +530,7 @@ class BiznesDashboard {
 					${frappe.utils.icon("refresh", "sm")} <span>${__("Yangilash")}</span>
 				</button>
 			</div>
-			<!-- OFF:qoshimcha-filtrlar — qo'shimcha filtrlar (kompaniya / filial / ombor / mijoz).
+			<!-- OFF-BELGI:qoshimcha-filtrlar — qo'shimcha filtrlar (kompaniya / filial / ombor / mijoz).
 			     Dashboard faqat sana oralig'i bo'yicha filtrlanadi.
 			<div class="od-toolbar__row od-toolbar__row--filters">
 				<div class="od-field" data-role="company"></div>
@@ -504,6 +541,7 @@ class BiznesDashboard {
 			</div>
 			-->
 		`);
+		if (this.ready) this.sync_toolbar_view();
 
 		// OFF:qoshimcha-filtrlar — kompaniya qiymati serverdan keladi (`get_meta().company`):
 		// cheklangan foydalanuvchida uning kompaniyasi, aks holda "Oyna sex".
@@ -566,6 +604,17 @@ class BiznesDashboard {
 
 		this.$toolbar.on("click", ".od-refresh", () => this.refresh({ force: true }));
 
+		this.$toolbar.on("click", ".bd-filiallar .bd-chip[data-filial]", (event) => {
+			const cc = $(event.currentTarget).data("filial") || null;
+			if ((cc || null) === (this.state.cost_center || null)) return;
+			this.state.cost_center = cc;
+			this.state.warehouse = $(event.currentTarget).data("wh") || null;
+			bd_saqlash.set("bd:filial:" + this.state.company, cc || "");
+			this.render_filters();
+			this.$kpis.addClass("od-kpis--loading").html(this.skeleton_cards(8));
+			this.refresh();
+		});
+
 		this.$toolbar.on("click", ".bd-comp[data-company]", (event) => {
 			const company = $(event.currentTarget).data("company");
 			if (company === this.state.company) return;
@@ -576,11 +625,8 @@ class BiznesDashboard {
 			this.state.kun_tanlangan = null;
 			this.state.tahlil_yil = null;
 			this.state.tahlil_oylar = [];
-			this.$toolbar
-				.find(".bd-comp")
-				.removeClass("is-active")
-				.filter(`[data-company="${company}"]`)
-				.addClass("is-active");
+			this.apply_saved_filial();
+			this.render_filters();
 			this.$kpis.addClass("od-kpis--loading").html(this.skeleton_cards(8));
 			this.refresh();
 		});
@@ -1197,6 +1243,8 @@ class BiznesDashboard {
 			const data = await this.call("get_daily", {
 				filters: {
 					company: this.state.company,
+					cost_center: this.state.cost_center,
+					warehouse: this.state.warehouse,
 					yil: this.state.kun_yil,
 					oy: this.state.kun_oy,
 					mijoz: this.state.kun_mijoz,
@@ -1450,6 +1498,8 @@ class BiznesDashboard {
 			const data = await this.call("get_tahlil", {
 				filters: {
 					company: this.state.company,
+					cost_center: this.state.cost_center,
+					warehouse: this.state.warehouse,
 					yil: this.state.tahlil_yil,
 					oylar: this.state.tahlil_oylar,
 					refresh: force ? 1 : 0,

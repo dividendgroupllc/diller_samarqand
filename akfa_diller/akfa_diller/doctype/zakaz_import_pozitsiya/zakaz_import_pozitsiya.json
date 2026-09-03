@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-30 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "nr",
+  "nom",
+  "olcham",
+  "dona",
+  "tannarx_uzs",
+  "tayyor_item",
+  "tavsif"
+ ],
+ "fields": [
+  {
+   "fieldname": "nr",
+   "fieldtype": "Data",
+   "label": "№",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "nom",
+   "fieldtype": "Data",
+   "label": "Mahsulot",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 3
+  },
+  {
+   "fieldname": "olcham",
+   "fieldtype": "Data",
+   "label": "O'lcham (mm)",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "dona",
+   "fieldtype": "Float",
+   "label": "Dona",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "tannarx_uzs",
+   "fieldtype": "Float",
+   "label": "Tannarx (UZS, 1 dona)",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "tayyor_item",
+   "fieldtype": "Link",
+   "label": "Tayyor mahsulot (Item)",
+   "options": "Item",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "tavsif",
+   "fieldtype": "Small Text",
+   "label": "Tavsif",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Zakaz Import Pozitsiya",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

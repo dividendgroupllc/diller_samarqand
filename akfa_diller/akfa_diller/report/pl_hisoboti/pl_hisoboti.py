@@ -35,8 +35,9 @@ def execute(filters=None):
 	from_date = str(period_list[0]["from_date"])
 	to_date = str(period_list[-1]["to_date"])
 
-	gl_rows = fetch_gl(company, from_date, to_date)
-	order_rows = fetch_order_counts(company, from_date, to_date)
+	cc_list = _cost_center_subtree(filters.get("cost_center"))
+	gl_rows = fetch_gl(company, from_date, to_date, cc_list)
+	order_rows = fetch_order_counts(company, from_date, to_date, cc_list)
 	abbr = frappe.get_cached_value("Company", company, "abbr") or ""
 
 	pdata, cogs_hisoblar = aggregate(period_list, gl_rows, order_rows, abbr)
@@ -95,7 +96,25 @@ def build_period_list(filters):
 
 # ─── Ma'lumot ────────────────────────────────────────────────────────────────
 
-def fetch_gl(company, from_date, to_date):
+def _cost_center_subtree(cost_center):
+	"""Tanlangan cost-center (guruh bo'lsa — butun ostidagilari bilan).
+	Bo'sh bo'lsa None — filtr qo'llanmaydi."""
+	if not cost_center:
+		return None
+	lft, rgt = frappe.db.get_value("Cost Center", cost_center, ["lft", "rgt"]) or (None, None)
+	if lft is None:
+		return [cost_center]
+	return [r[0] for r in frappe.db.sql(
+		"""SELECT name FROM `tabCost Center` WHERE lft >= %s AND rgt <= %s""",
+		(lft, rgt))] or [cost_center]
+
+
+def fetch_gl(company, from_date, to_date, cc_list=None):
+	cc_shart = ""
+	params = [company, from_date, to_date]
+	if cc_list:
+		cc_shart = " AND gle.cost_center IN %s"
+		params.append(tuple(cc_list))
 	return frappe.db.sql("""
 		SELECT
 			gle.posting_date,
@@ -114,10 +133,10 @@ def fetch_gl(company, from_date, to_date):
 		  -- Yil yopilganda Period Closing Voucher butun natijani teskari
 		  -- yozadi; chiqarilmasa hisobot nolga tushib qolardi.
 		  AND gle.voucher_type != 'Period Closing Voucher'
-		  AND acc.root_type IN ('Income', 'Expense')
+		  AND acc.root_type IN ('Income', 'Expense'){cc}
 		GROUP BY gle.posting_date, gle.account
 		ORDER BY gle.posting_date
-	""", (company, from_date, to_date), as_dict=True)
+	""".replace("{cc}", cc_shart), tuple(params), as_dict=True)
 
 
 def fetch_expense_tree(company):
@@ -131,14 +150,21 @@ def fetch_expense_tree(company):
 	""", (company,), as_dict=True)
 
 
-def fetch_order_counts(company, from_date, to_date):
+def fetch_order_counts(company, from_date, to_date, cc_list=None):
+	cc_shart = ""
+	params = [company, from_date, to_date]
+	if cc_list:
+		# chek filial-kesimida: hujjat qatorlari shu cost-centerga tegishli
+		cc_shart = """ AND EXISTS (SELECT 1 FROM `tabSales Invoice Item` sii
+			WHERE sii.parent = si.name AND sii.cost_center IN %s)"""
+		params.append(tuple(cc_list))
 	return frappe.db.sql("""
-		SELECT posting_date, COUNT(*) AS cnt
-		FROM `tabSales Invoice`
-		WHERE company = %s AND docstatus = 1
-		  AND posting_date BETWEEN %s AND %s
-		GROUP BY posting_date
-	""", (company, from_date, to_date), as_dict=True)
+		SELECT si.posting_date, COUNT(*) AS cnt
+		FROM `tabSales Invoice` si
+		WHERE si.company = %s AND si.docstatus = 1
+		  AND si.posting_date BETWEEN %s AND %s{cc}
+		GROUP BY si.posting_date
+	""".replace("{cc}", cc_shart), tuple(params), as_dict=True)
 
 
 # ─── Yig'ish ─────────────────────────────────────────────────────────────────

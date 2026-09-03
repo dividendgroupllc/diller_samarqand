@@ -17,5 +17,6 @@ def generate_pl_pdf(filters=None):
 		title="%s · P&L hisoboti" % (f.get("company") or ""),
 		subtitle="Akfa diller",
 		filename_prefix="PL_Hisoboti",
+		extra_meta_keys=["cost_center"],
 		report_name="PL Hisoboti",
 	)

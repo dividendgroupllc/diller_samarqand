@@ -2063,3 +2063,52 @@
 	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 	margin-bottom: 12px;
 }
+
+/* Filial-chiplar qatori (trade-kompaniyalar) */
+.biznes-dash .bd-filiallar,
+.oyna-dash .bd-filiallar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+}
+
+.biznes-dash .bd-filiallar__label {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	margin-right: 2px;
+}
+
+/* Siqilishga qarshi nafas (2026-09-03): toolbar-qatorlar va kunlik-chiplar */
+.biznes-dash .od-toolbar__row + .od-toolbar__row {
+	margin-top: 10px;
+}
+
+.biznes-dash .bd-companies {
+	margin-bottom: 2px;
+}
+
+.biznes-dash .bd-filiallar .bd-chip {
+	padding-top: 4px;
+	padding-bottom: 4px;
+}
+
+.bd-kunlik .bd-chips {
+	row-gap: 8px;
+	margin-bottom: 10px;
+}
+
+.bd-kunlik .bd-chips--mijozlar {
+	margin: 6px 0 14px;
+}
+
+.bd-kunlik .bd-kpi-strip {
+	margin: 14px 0 18px;
+}
+
+.biznes-dash .bd-filtrbar {
+	margin-bottom: 4px;
+}

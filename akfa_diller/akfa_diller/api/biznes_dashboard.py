@@ -97,6 +97,15 @@ def get_meta():
 				"abbr": frappe.get_cached_value("Company", c, "abbr"),
 				"profile": PROFILLAR[c],
 				"sections": list(PROFIL_BOLIMLARI[PROFILLAR[c]]),
+				# Filial-filtr chiplari uchun (faqat trade-kompaniyalar)
+				"branches": (
+					frappe.db.sql(
+						"""SELECT label, cost_center, warehouse
+						   FROM `tabReport Service Dealer Branch`
+						   WHERE company = %s AND COALESCE(cost_center,'') != ''
+						   ORDER BY idx""", (c,), as_dict=True)
+					if PROFILLAR[c] == "trade" else []
+				),
 			}
 			for c in comps
 		],
@@ -148,20 +157,22 @@ def get_dashboard(filters=None, sections=None):
 
 def _pe_total(ctx, from_date, to_date, payment_type="Receive"):
 	"""Davr ichidagi Payment Entry aylanmasi (kompaniya valyutasida)."""
+	params = {
+		"company": ctx.company,
+		"payment_type": payment_type,
+		"from_date": from_date,
+		"to_date": to_date,
+	}
+	cc = _cc_sharti(ctx, params, "pe.cost_center")
 	row = frappe.db.sql(
 		"""
 		SELECT SUM(pe.base_paid_amount) AS amount, COUNT(*) AS docs
 		FROM `tabPayment Entry` pe
 		WHERE pe.company = %(company)s AND pe.docstatus = 1
 		  AND pe.payment_type = %(payment_type)s
-		  AND pe.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		""",
-		{
-			"company": ctx.company,
-			"payment_type": payment_type,
-			"from_date": from_date,
-			"to_date": to_date,
-		},
+		  AND pe.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
+		""".format(cc=cc),
+		params,
 		as_dict=True,
 	)[0]
 	return frappe._dict(
@@ -170,6 +181,56 @@ def _pe_total(ctx, from_date, to_date, payment_type="Receive"):
 			"docs": cint(row.docs),
 		}
 	)
+
+
+def _cc_subtree(cost_center):
+	"""Cost-center (guruh bo'lsa butun ostidagilari). Bo'sh -> None."""
+	if not cost_center:
+		return None
+	lft, rgt = frappe.db.get_value(
+		"Cost Center", cost_center, ["lft", "rgt"]) or (None, None)
+	if lft is None:
+		return [cost_center]
+	return [r[0] for r in frappe.db.sql(
+		"SELECT name FROM `tabCost Center` WHERE lft >= %s AND rgt <= %s",
+		(lft, rgt))] or [cost_center]
+
+
+def _cc_sharti(ctx, params, ustun):
+	"""Filial-filtr sharti (SI-item / PE darajasida). GL so'rovlarda kerak
+	emas — ular od._gl_extra_conditions orqali o'zi filtrlanadi."""
+	if not ctx.cost_center:
+		return ""
+	params["cc_list"] = tuple(_cc_subtree(ctx.cost_center))
+	return " AND {0} IN %(cc_list)s".format(ustun)
+
+
+def _wh_sharti(ctx, params, ustun="sle.warehouse"):
+	"""Filial-ombor sharti (SLE-tannarx uchun)."""
+	if not ctx.warehouse:
+		return ""
+	params["wh"] = ctx.warehouse
+	return " AND {0} = %(wh)s".format(ustun)
+
+
+def _filial_savdo(ctx, from_date, to_date):
+	"""Filial savdosi QATOR (item) darajasida — SI sarlavhasida filial yo'q.
+	Netto (base_net_amount): Filiallar jadvali bilan bir xil ta'rif."""
+	params = {"company": ctx.company, "from_date": from_date, "to_date": to_date}
+	cc = _cc_sharti(ctx, params, "sii.cost_center")
+	row = frappe.db.sql(
+		"""
+		SELECT SUM(sii.base_net_amount) AS s,
+		       COUNT(DISTINCT si.name) AS docs,
+		       COUNT(DISTINCT si.customer) AS customers
+		FROM `tabSales Invoice` si
+		JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+		WHERE si.company = %(company)s AND si.docstatus = 1
+		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
+		""".format(cc=cc), params, as_dict=True)[0]
+	return frappe._dict(
+		net=od._money_add({}, ctx.company_currency, flt(row.s)),
+		docs=cint(row.docs), customers=cint(row.customers))
 
 
 def _gl_period_net(ctx, accounts, from_date, to_date):
@@ -206,10 +267,16 @@ def _trade_overview(ctx):
 	cards = []
 	valyuta = ctx.company_currency
 
-	# 1. Savdo (SI, hujjat valyutasida) + delta
-	now_rev = od._revenue(ctx, ctx.from_date, ctx.to_date)
-	prev_rev = od._revenue(ctx, ctx.prev_from, ctx.prev_to)
-	invoices = od._invoice_stats(ctx, ctx.from_date, ctx.to_date)
+	# 1. Savdo (SI, hujjat valyutasida) + delta.
+	# Filial tanlangan bo'lsa — item-darajada (SI sarlavhasida filial yo'q).
+	if ctx.cost_center:
+		now_rev = _filial_savdo(ctx, ctx.from_date, ctx.to_date)
+		prev_rev = _filial_savdo(ctx, ctx.prev_from, ctx.prev_to)
+		invoices = frappe._dict(invoices=now_rev.docs, customers=now_rev.customers)
+	else:
+		now_rev = od._revenue(ctx, ctx.from_date, ctx.to_date)
+		prev_rev = od._revenue(ctx, ctx.prev_from, ctx.prev_to)
+		invoices = od._invoice_stats(ctx, ctx.from_date, ctx.to_date)
 	cards.append({
 		"key": "sales",
 		"icon": "sell",
@@ -386,35 +453,62 @@ def get_daily(filters=None):
 		if mijoz:
 			oy_params["mijoz"] = mijoz
 			mijoz_sharti = " AND si.customer = %(mijoz)s"
+		# filial (cost-center) sharti — item-darajada; ombor-sharti tannarx uchun
+		cc = _cc_sharti(ctx, oy_params, "sii.cost_center")
+		wh = _wh_sharti(ctx, oy_params, "sle.warehouse")
 
 		# --- kalendar (butun oy, mijoz filtri bilan) ---
+		# Filial tanlansa item-darajada (netto): SI sarlavhasida filial yo'q
 		kunlar = {}
-		for r in frappe.db.sql(
-			"""
+		if ctx.cost_center:
+			kalendar_sql = """
+			SELECT DAY(si.posting_date) AS kun,
+			       SUM(sii.base_net_amount) AS summa,
+			       COUNT(DISTINCT si.name) AS docs
+			FROM `tabSales Invoice` si
+			JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}{cc}
+			GROUP BY DAY(si.posting_date)
+			""".format(mijoz=mijoz_sharti, cc=cc)
+		else:
+			kalendar_sql = """
 			SELECT DAY(si.posting_date) AS kun,
 			       SUM(si.base_grand_total) AS summa, COUNT(*) AS docs
 			FROM `tabSales Invoice` si
 			WHERE si.company = %(company)s AND si.docstatus = 1
 			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}
 			GROUP BY DAY(si.posting_date)
-			""".format(mijoz=mijoz_sharti),
-			oy_params, as_dict=True,
-		):
+			""".format(mijoz=mijoz_sharti)
+		for r in frappe.db.sql(kalendar_sql, oy_params, as_dict=True):
 			if r.kun:
 				kunlar[cint(r.kun)] = {"summa": flt(r.summa), "docs": cint(r.docs)}
 
-		# --- mijoz-chiplar (oyning top-24 mijozi, filtrsiz) ---
-		mijozlar = frappe.db.sql(
-			"""
-			SELECT si.customer, si.customer_name, SUM(si.base_grand_total) AS savdo
-			FROM `tabSales Invoice` si
-			WHERE si.company = %(company)s AND si.docstatus = 1
-			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
-			GROUP BY si.customer ORDER BY savdo DESC LIMIT 24
-			""",
-			{"company": ctx.company, "from_date": oy_boshi, "to_date": oy_oxiri},
-			as_dict=True,
-		)
+		# --- mijoz-chiplar (oyning top-24 mijozi, mijoz-filtrsiz) ---
+		chip_params = {"company": ctx.company, "from_date": oy_boshi,
+		               "to_date": oy_oxiri}
+		chip_cc = _cc_sharti(ctx, chip_params, "sii.cost_center")
+		if ctx.cost_center:
+			mijozlar = frappe.db.sql(
+				"""
+				SELECT si.customer, si.customer_name,
+				       SUM(sii.base_net_amount) AS savdo
+				FROM `tabSales Invoice` si
+				JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+				WHERE si.company = %(company)s AND si.docstatus = 1
+				  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
+				GROUP BY si.customer ORDER BY savdo DESC LIMIT 24
+				""".format(cc=chip_cc), chip_params, as_dict=True)
+		else:
+			mijozlar = frappe.db.sql(
+				"""
+				SELECT si.customer, si.customer_name,
+				       SUM(si.base_grand_total) AS savdo
+				FROM `tabSales Invoice` si
+				WHERE si.company = %(company)s AND si.docstatus = 1
+				  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+				GROUP BY si.customer ORDER BY savdo DESC LIMIT 24
+				""", chip_params, as_dict=True)
 
 		# --- qamrov (jadval + KPI): oy(+mijoz) yoki bitta kun ---
 		q_from, q_to = oy_boshi, oy_oxiri
@@ -429,9 +523,9 @@ def get_daily(filters=None):
 			FROM `tabSales Invoice` si
 			JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 			WHERE si.company = %(company)s AND si.docstatus = 1
-			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}{cc}
 			GROUP BY sii.item_code
-			""".format(mijoz=mijoz_sharti),
+			""".format(mijoz=mijoz_sharti, cc=cc),
 			q_params, as_dict=True,
 		)
 		tannarx_t = {}
@@ -439,14 +533,14 @@ def get_daily(filters=None):
 			"""
 			SELECT sle.item_code, SUM(-sle.stock_value_difference) AS tannarx
 			FROM `tabStock Ledger Entry` sle
-			WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'
+			WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			  AND sle.voucher_no IN (
 				SELECT si.name FROM `tabSales Invoice` si
 				WHERE si.company = %(company)s AND si.docstatus = 1
 				  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}
 			  )
 			GROUP BY sle.item_code
-			""".format(mijoz=mijoz_sharti),
+			""".format(mijoz=mijoz_sharti, wh=wh),
 			q_params, as_dict=True,
 		):
 			tannarx_t[r.item_code] = flt(r.tannarx)
@@ -465,16 +559,30 @@ def get_daily(filters=None):
 			})
 
 		# --- KPI (qamrov bo'yicha) ---
-		bosh = frappe.db.sql(
-			"""
-			SELECT SUM(si.base_grand_total) AS savdo, COUNT(*) AS docs,
-			       COUNT(DISTINCT si.customer) AS mijozlar
-			FROM `tabSales Invoice` si
-			WHERE si.company = %(company)s AND si.docstatus = 1
-			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}
-			""".format(mijoz=mijoz_sharti),
-			q_params, as_dict=True,
-		)[0]
+		if ctx.cost_center:
+			bosh = frappe.db.sql(
+				"""
+				SELECT SUM(sii.base_net_amount) AS savdo,
+				       COUNT(DISTINCT si.name) AS docs,
+				       COUNT(DISTINCT si.customer) AS mijozlar
+				FROM `tabSales Invoice` si
+				JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+				WHERE si.company = %(company)s AND si.docstatus = 1
+				  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}{cc}
+				""".format(mijoz=mijoz_sharti, cc=cc),
+				q_params, as_dict=True,
+			)[0]
+		else:
+			bosh = frappe.db.sql(
+				"""
+				SELECT SUM(si.base_grand_total) AS savdo, COUNT(*) AS docs,
+				       COUNT(DISTINCT si.customer) AS mijozlar
+				FROM `tabSales Invoice` si
+				WHERE si.company = %(company)s AND si.docstatus = 1
+				  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{mijoz}
+				""".format(mijoz=mijoz_sharti),
+				q_params, as_dict=True,
+			)[0]
 		savdo = flt(bosh.savdo)
 		tannarx = sum(t["tannarx"] for t in tovarlar)
 		marja = savdo - tannarx
@@ -569,6 +677,8 @@ def get_tahlil(filters=None):
 	if oylar:
 		oy_sharti = " AND MONTH(si.posting_date) IN %(oylar)s"
 		params["oylar"] = tuple(oylar)
+	cc = _cc_sharti(ctx, params, "sii.cost_center")
+	wh = _wh_sharti(ctx, params, "sle.warehouse")
 
 	SI_SCOPE = """FROM `tabSales Invoice` si
 			WHERE si.company = %(company)s AND si.docstatus = 1
@@ -576,17 +686,31 @@ def get_tahlil(filters=None):
 
 	def hisobla():
 		# --- KPI ---
-		bosh = frappe.db.sql(
-			"""SELECT SUM(si.base_grand_total) AS savdo,
-			          SUM(CASE WHEN si.is_return = 1 THEN -si.base_grand_total ELSE 0 END) AS vozvrat,
-			          COUNT(*) AS docs, COUNT(DISTINCT si.customer) AS mijozlar
-			""" + SI_SCOPE, params, as_dict=True)[0]
+		if ctx.cost_center:
+			bosh = frappe.db.sql(
+				"""SELECT SUM(sii.base_net_amount) AS savdo,
+				          SUM(CASE WHEN si.is_return = 1
+				              THEN -sii.base_net_amount ELSE 0 END) AS vozvrat,
+				          COUNT(DISTINCT si.name) AS docs,
+				          COUNT(DISTINCT si.customer) AS mijozlar
+				   FROM `tabSales Invoice` si
+				   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+				   WHERE si.company = %(company)s AND si.docstatus = 1
+				     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}""".format(
+					oy=oy_sharti, cc=cc), params, as_dict=True)[0]
+		else:
+			bosh = frappe.db.sql(
+				"""SELECT SUM(si.base_grand_total) AS savdo,
+				          SUM(CASE WHEN si.is_return = 1 THEN -si.base_grand_total ELSE 0 END) AS vozvrat,
+				          COUNT(*) AS docs, COUNT(DISTINCT si.customer) AS mijozlar
+				""" + SI_SCOPE, params, as_dict=True)[0]
 
 		dona = flt(frappe.db.sql(
 			"""SELECT SUM(sii.qty) FROM `tabSales Invoice` si
 			   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 			   WHERE si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}""".format(oy=oy_sharti),
+			     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}""".format(
+				oy=oy_sharti, cc=cc),
 			params)[0][0])
 
 		# --- tovarlar (savdo + tannarx) ---
@@ -596,19 +720,19 @@ def get_tahlil(filters=None):
 			   FROM `tabSales Invoice` si
 			   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 			   WHERE si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}
+			     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}
 			   GROUP BY sii.item_code ORDER BY summa DESC LIMIT 100
-			""".format(oy=oy_sharti), params, as_dict=True)
+			""".format(oy=oy_sharti, cc=cc), params, as_dict=True)
 
 		tannarx_t = {}
 		for r in frappe.db.sql(
 			"""SELECT sle.item_code, SUM(-sle.stock_value_difference) AS t
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
-			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'
+			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
 			     AND YEAR(si.posting_date) = %(yil)s{oy}
-			   GROUP BY sle.item_code""".format(oy=oy_sharti),
+			   GROUP BY sle.item_code""".format(oy=oy_sharti, wh=wh),
 			params, as_dict=True):
 			tannarx_t[r.item_code] = flt(r.t)
 
@@ -623,21 +747,33 @@ def get_tahlil(filters=None):
 			})
 
 		# --- mijozlar (savdo + tannarx mijoz kesimida) ---
-		savdo_m = frappe.db.sql(
-			"""SELECT si.customer, si.customer_name,
-			          SUM(si.base_grand_total) AS summa, COUNT(*) AS docs
-			""" + SI_SCOPE + " GROUP BY si.customer ORDER BY summa DESC LIMIT 100",
-			params, as_dict=True)
+		if ctx.cost_center:
+			savdo_m = frappe.db.sql(
+				"""SELECT si.customer, si.customer_name,
+				          SUM(sii.base_net_amount) AS summa,
+				          COUNT(DISTINCT si.name) AS docs
+				   FROM `tabSales Invoice` si
+				   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+				   WHERE si.company = %(company)s AND si.docstatus = 1
+				     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}
+				   GROUP BY si.customer ORDER BY summa DESC LIMIT 100""".format(
+					oy=oy_sharti, cc=cc), params, as_dict=True)
+		else:
+			savdo_m = frappe.db.sql(
+				"""SELECT si.customer, si.customer_name,
+				          SUM(si.base_grand_total) AS summa, COUNT(*) AS docs
+				""" + SI_SCOPE + " GROUP BY si.customer ORDER BY summa DESC LIMIT 100",
+				params, as_dict=True)
 
 		tannarx_m = {}
 		for r in frappe.db.sql(
 			"""SELECT si.customer, SUM(-sle.stock_value_difference) AS t
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
-			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'
+			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
 			     AND YEAR(si.posting_date) = %(yil)s{oy}
-			   GROUP BY si.customer""".format(oy=oy_sharti),
+			   GROUP BY si.customer""".format(oy=oy_sharti, wh=wh),
 			params, as_dict=True):
 			tannarx_m[r.customer] = flt(r.t)
 
@@ -659,9 +795,10 @@ def get_tahlil(filters=None):
 			"""SELECT SUM(-sle.stock_value_difference)
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
-			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'
+			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}""".format(oy=oy_sharti),
+			     AND YEAR(si.posting_date) = %(yil)s{oy}""".format(
+				oy=oy_sharti, wh=wh),
 			params)[0][0])
 		marja = savdo - tannarx
 
@@ -673,15 +810,27 @@ def get_tahlil(filters=None):
 		# Oylik dinamika — so'nggi 3 yil (grafikda yillar alohida qatlam bo'ladi;
 		# hozircha bitta yil bo'lsa bitta qatlam chiqadi)
 		tanlangan3 = [y for y in (yillar or [yil]) if y <= yil][-3:] or [yil]
+		y3_params = {"company": ctx.company, "yillar3": tuple(tanlangan3)}
+		y3_cc = _cc_sharti(ctx, y3_params, "sii.cost_center")
 		oylik_yillar = {y: [0.0] * 12 for y in tanlangan3}
-		for r in frappe.db.sql(
-			"""SELECT YEAR(si.posting_date) AS y, MONTH(si.posting_date) AS oy,
+		if ctx.cost_center:
+			oylik_sql = """SELECT YEAR(si.posting_date) AS y,
+			          MONTH(si.posting_date) AS oy,
+			          SUM(sii.base_net_amount) AS savdo
+			   FROM `tabSales Invoice` si
+			   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			   WHERE si.company = %(company)s AND si.docstatus = 1
+			     AND YEAR(si.posting_date) IN %(yillar3)s{cc}
+			   GROUP BY YEAR(si.posting_date), MONTH(si.posting_date)""".format(cc=y3_cc)
+		else:
+			oylik_sql = """SELECT YEAR(si.posting_date) AS y,
+			          MONTH(si.posting_date) AS oy,
 			          SUM(si.base_grand_total) AS savdo
 			   FROM `tabSales Invoice` si
 			   WHERE si.company = %(company)s AND si.docstatus = 1
 			     AND YEAR(si.posting_date) IN %(yillar3)s
-			   GROUP BY YEAR(si.posting_date), MONTH(si.posting_date)""",
-			{"company": ctx.company, "yillar3": tuple(tanlangan3)}, as_dict=True):
+			   GROUP BY YEAR(si.posting_date), MONTH(si.posting_date)"""
+		for r in frappe.db.sql(oylik_sql, y3_params, as_dict=True):
 			if r.y in oylik_yillar and r.oy:
 				oylik_yillar[cint(r.y)][cint(r.oy) - 1] = flt(r.savdo)
 
@@ -694,9 +843,9 @@ def get_tahlil(filters=None):
 			   FROM `tabSales Invoice` si
 			   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 			   WHERE si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) IN %(yillar3)s
-			   GROUP BY YEAR(si.posting_date), MONTH(si.posting_date)""",
-			{"company": ctx.company, "yillar3": tuple(tanlangan3)}, as_dict=True):
+			     AND YEAR(si.posting_date) IN %(yillar3)s{cc}
+			   GROUP BY YEAR(si.posting_date), MONTH(si.posting_date)""".format(cc=y3_cc),
+			y3_params, as_dict=True):
 			if r.y in dona_yillar and r.oy:
 				dona_yillar[cint(r.y)][cint(r.oy) - 1] = flt(r.dona)
 
@@ -708,11 +857,12 @@ def get_tahlil(filters=None):
 			          SUM(-sle.stock_value_difference) AS t
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
-			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'
+			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
 			     AND YEAR(si.posting_date) = %(yil)s
-			   GROUP BY MONTH(si.posting_date)""",
-			{"company": ctx.company, "yil": yil}, as_dict=True):
+			   GROUP BY MONTH(si.posting_date)""".format(wh=wh),
+			{"company": ctx.company, "yil": yil,
+			 **({"wh": ctx.warehouse} if ctx.warehouse else {})}, as_dict=True):
 			if r.oy:
 				tannarx_oy[cint(r.oy)] = flt(r.t)
 
@@ -729,15 +879,26 @@ def get_tahlil(filters=None):
 
 		# Vozvratlar oyma-oy (tanlangan yil bo'yicha 12 qator)
 		vozvrat_oylik = {m: {"oy": m, "dona": 0.0, "summa": 0.0} for m in range(1, 13)}
-		for r in frappe.db.sql(
-			"""SELECT MONTH(posting_date) AS oy,
+		v_params = {"company": ctx.company, "yil": yil}
+		v_cc = _cc_sharti(ctx, v_params, "sii.cost_center")
+		if ctx.cost_center:
+			vozvrat_sql = """SELECT MONTH(si.posting_date) AS oy,
+			          SUM(ABS(sii.qty)) AS dona,
+			          SUM(ABS(sii.base_net_amount)) AS summa
+			   FROM `tabSales Invoice` si
+			   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			   WHERE si.company = %(company)s AND si.docstatus = 1
+			     AND si.is_return = 1 AND YEAR(si.posting_date) = %(yil)s{cc}
+			   GROUP BY MONTH(si.posting_date)""".format(cc=v_cc)
+		else:
+			vozvrat_sql = """SELECT MONTH(posting_date) AS oy,
 			          SUM(ABS(COALESCE(total_qty, 0))) AS dona,
 			          SUM(ABS(base_grand_total)) AS summa
 			   FROM `tabSales Invoice`
 			   WHERE company = %(company)s AND docstatus = 1 AND is_return = 1
 			     AND YEAR(posting_date) = %(yil)s
-			   GROUP BY MONTH(posting_date)""",
-			{"company": ctx.company, "yil": yil}, as_dict=True):
+			   GROUP BY MONTH(posting_date)"""
+		for r in frappe.db.sql(vozvrat_sql, v_params, as_dict=True):
 			if r.oy:
 				vozvrat_oylik[cint(r.oy)] = {
 					"oy": cint(r.oy), "dona": flt(r.dona), "summa": flt(r.summa)}
@@ -764,11 +925,15 @@ def get_tahlil(filters=None):
 			+ od.get_payable_accounts(ctx.company))
 		trend_p = {"company": ctx.company, "yil": yil,
 		           "boshi": "{0}-01-01".format(yil), "schyotlar": gl_schyotlar}
+		t_cc = _cc_sharti(ctx, trend_p, "posting_gl.cost_center").replace(
+			"posting_gl.", "")  # GL Entry ustuni to'g'ridan-to'g'ri
+		t_wh = _wh_sharti(ctx, trend_p, "sle.warehouse")
 		gl_ochilish = flt(frappe.db.sql(
 			"""SELECT SUM(debit - credit) FROM `tabGL Entry`
 			   WHERE company = %(company)s AND is_cancelled = 0
 			     AND account IN %(schyotlar)s
-			     AND posting_date < %(boshi)s""", trend_p)[0][0]) if gl_schyotlar else 0.0
+			     AND posting_date < %(boshi)s{cc}""".format(cc=t_cc),
+			trend_p)[0][0]) if gl_schyotlar else 0.0
 		gl_oy = {}
 		if gl_schyotlar:
 			for r in frappe.db.sql(
@@ -776,8 +941,9 @@ def get_tahlil(filters=None):
 				   FROM `tabGL Entry`
 				   WHERE company = %(company)s AND is_cancelled = 0
 				     AND account IN %(schyotlar)s
-				     AND YEAR(posting_date) = %(yil)s
-				   GROUP BY MONTH(posting_date)""", trend_p, as_dict=True):
+				     AND YEAR(posting_date) = %(yil)s{cc}
+				   GROUP BY MONTH(posting_date)""".format(cc=t_cc),
+				trend_p, as_dict=True):
 				if r.oy:
 					gl_oy[cint(r.oy)] = flt(r.f)
 		stok_ochilish = flt(frappe.db.sql(
@@ -785,7 +951,8 @@ def get_tahlil(filters=None):
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabWarehouse` w ON w.name = sle.warehouse
 			   WHERE w.company = %(company)s AND sle.is_cancelled = 0
-			     AND sle.posting_date < %(boshi)s""", trend_p)[0][0])
+			     AND sle.posting_date < %(boshi)s{wh}""".format(wh=t_wh),
+			trend_p)[0][0])
 		stok_oy = {}
 		for r in frappe.db.sql(
 			"""SELECT MONTH(sle.posting_date) AS oy,
@@ -793,8 +960,9 @@ def get_tahlil(filters=None):
 			   FROM `tabStock Ledger Entry` sle
 			   JOIN `tabWarehouse` w ON w.name = sle.warehouse
 			   WHERE w.company = %(company)s AND sle.is_cancelled = 0
-			     AND YEAR(sle.posting_date) = %(yil)s
-			   GROUP BY MONTH(sle.posting_date)""", trend_p, as_dict=True):
+			     AND YEAR(sle.posting_date) = %(yil)s{wh}
+			   GROUP BY MONTH(sle.posting_date)""".format(wh=t_wh),
+			trend_p, as_dict=True):
 			if r.oy:
 				stok_oy[cint(r.oy)] = flt(r.f)
 
@@ -883,19 +1051,37 @@ def _tops(ctx):
 	"""
 	params = {"company": ctx.company, "from_date": ctx.from_date,
 	          "to_date": ctx.to_date}
+	cc_sii = _cc_sharti(ctx, params, "sii.cost_center")
+	cc_pe = _cc_sharti(ctx, params, "pe.cost_center")
 
-	mijozlar = frappe.db.sql(
-		"""
-		SELECT si.customer, si.customer_name,
-		       SUM(si.base_grand_total) AS savdo,
-		       COUNT(*) AS docs
-		FROM `tabSales Invoice` si
-		WHERE si.company = %(company)s AND si.docstatus = 1
-		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		GROUP BY si.customer
-		ORDER BY savdo DESC
-		LIMIT 20
-		""", params, as_dict=True)
+	if ctx.cost_center:
+		# Filial rejimi: item-darajada (netto) — sarlavhada filial yo'q
+		mijozlar = frappe.db.sql(
+			"""
+			SELECT si.customer, si.customer_name,
+			       SUM(sii.base_net_amount) AS savdo,
+			       COUNT(DISTINCT si.name) AS docs
+			FROM `tabSales Invoice` si
+			JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
+			GROUP BY si.customer
+			ORDER BY savdo DESC
+			LIMIT 20
+			""".format(cc=cc_sii), params, as_dict=True)
+	else:
+		mijozlar = frappe.db.sql(
+			"""
+			SELECT si.customer, si.customer_name,
+			       SUM(si.base_grand_total) AS savdo,
+			       COUNT(*) AS docs
+			FROM `tabSales Invoice` si
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			GROUP BY si.customer
+			ORDER BY savdo DESC
+			LIMIT 20
+			""", params, as_dict=True)
 
 	tolovlar = {}
 	if mijozlar:
@@ -905,19 +1091,29 @@ def _tops(ctx):
 			FROM `tabPayment Entry` pe
 			WHERE pe.company = %(company)s AND pe.docstatus = 1
 			  AND pe.payment_type = 'Receive' AND pe.party_type = 'Customer'
-			  AND pe.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			  AND pe.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
 			  AND pe.party IN %(mijozlar)s
 			GROUP BY pe.party
-			""", dict(params, mijozlar=tuple(m.customer for m in mijozlar)),
+			""".format(cc=cc_pe),
+			dict(params, mijozlar=tuple(m.customer for m in mijozlar)),
 			as_dict=True):
 			tolovlar[r.party] = flt(r.amount)
 
-	jami_savdo = flt(frappe.db.sql(
-		"""
-		SELECT SUM(si.base_grand_total) FROM `tabSales Invoice` si
-		WHERE si.company = %(company)s AND si.docstatus = 1
-		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
-		""", params)[0][0])
+	if ctx.cost_center:
+		jami_savdo = flt(frappe.db.sql(
+			"""
+			SELECT SUM(sii.base_net_amount) FROM `tabSales Invoice` si
+			JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
+			""".format(cc=cc_sii), params)[0][0])
+	else:
+		jami_savdo = flt(frappe.db.sql(
+			"""
+			SELECT SUM(si.base_grand_total) FROM `tabSales Invoice` si
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+			""", params)[0][0])
 
 	tovarlar = frappe.db.sql(
 		"""
@@ -927,11 +1123,11 @@ def _tops(ctx):
 		FROM `tabSales Invoice` si
 		JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 		WHERE si.company = %(company)s AND si.docstatus = 1
-		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
+		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s{cc}
 		GROUP BY sii.item_code
 		ORDER BY summa DESC
 		LIMIT 20
-		""", params, as_dict=True)
+		""".format(cc=cc_sii), params, as_dict=True)
 
 	def ulush(qiymat):
 		return round(qiymat / jami_savdo * 100, 1) if jami_savdo else None

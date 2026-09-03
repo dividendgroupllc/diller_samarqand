@@ -21,11 +21,12 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-# ── Ranglar (Biznes paneli uslubi) ──────────────────────────────────────────
-C_HEADER_BG = "#14304a"
-C_SECTION_BG = "#3b7ddd"
-C_RESULT_BG = "#1f5cb0"
-C_SUB_BG = "#e8f0fb"
+# ── Ranglar (foydalanuvchi 2026-09-03: "P&L odatda qizil edi" —
+#    avvalgi jazira/pokiza PL'lari palitrasi) ────────────────────────────────
+C_HEADER_BG = "#0f2942"
+C_SECTION_BG = "#c0392b"
+C_RESULT_BG = "#a3120f"
+C_SUB_BG = "#fdebd3"
 C_NEG = "#c0392b"
 
 # ── O'lchamlar (punktda) ────────────────────────────────────────────────────
@@ -179,11 +180,11 @@ def build_html(title, subtitle, filters, columns, data, meta_lines=None):
 
   tr.r-root td {{ background: {C_SECTION_BG}; color: #fff; font-weight: 700;
                   text-transform: uppercase; letter-spacing: .2pt; }}
-  tr.r-root td.neg {{ color: #ffe0db; }}
+  tr.r-root td.neg {{ color: #ffd9d4; }}
   tr.r-root td.lbl .g {{ border-left-color: rgba(255,255,255,.4); }}
 
   tr.r-result td {{ background: {C_RESULT_BG}; color: #fff; font-weight: 800; }}
-  tr.r-result td.neg {{ color: #ffe0db; }}
+  tr.r-result td.neg {{ color: #ffd9d4; }}
   tr.r-result td.lbl .g {{ border-left-color: rgba(255,255,255,.4); }}
 
   tr.r-sub td {{ background: {C_SUB_BG}; color: #111; font-weight: 700; }}
