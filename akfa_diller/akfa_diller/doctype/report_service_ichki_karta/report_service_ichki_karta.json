@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:IK-{#####}",
+ "creation": "2026-09-10 09:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "client_name",
+  "rol",
+  "label",
+  "dealer_id",
+  "company",
+  "sec_hisob",
+  "naqd_account",
+  "bank_account",
+  "karta_account",
+  "enabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "client_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "API'dagi klient nomi",
+   "reqd": 1,
+   "description": "To'lov lentasidagi fromClient/toClient nomi — AYNAN shu ko'rinishda"
+  },
+  {
+   "fieldname": "rol",
+   "fieldtype": "Select",
+   "options": "Filial\nAsosiy (egizak)",
+   "default": "Filial",
+   "in_list_view": 1,
+   "label": "Roli",
+   "reqd": 1,
+   "description": "Filial — asosiy ofis lentasidagi filial kartasi (ichki ko'chirma yaratiladi). Asosiy (egizak) — filial lentasidagi asosiy ofis kartasi: bu qatorlar O'TKAZIB YUBORILADI, chunki harakat asosiy tomonda allaqachon yozilgan"
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Filial nomi"
+  },
+  {
+   "fieldname": "dealer_id",
+   "fieldtype": "Data",
+   "label": "Filial dealer_id"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "options": "Company",
+   "label": "Kompaniya",
+   "reqd": 1,
+   "description": "Ichki ko'chirma faqat BIR kompaniya ichida bo'ladi; kompaniyalararo qator eski usulda (mijoz/ta'minotchi) yoziladi"
+  },
+  {"fieldname": "sec_hisob", "fieldtype": "Section Break", "label": "Qarshi tomon hisoblari (kanal bo'yicha)"},
+  {
+   "fieldname": "naqd_account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "in_list_view": 1,
+   "label": "Naqd hisob",
+   "description": "Asosiy hisob: naqd kanal (Выручка, Накд, Расход…) shu hisobdan chiqadi"
+  },
+  {
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "label": "Bank / perechislenie hisobi",
+   "description": "Bo'sh bo'lsa naqd hisob ishlatiladi"
+  },
+  {
+   "fieldname": "karta_account",
+   "fieldtype": "Link",
+   "options": "Account",
+   "label": "Plastik / click hisobi",
+   "description": "Bo'sh bo'lsa naqd hisob ishlatiladi"
+  },
+  {"default": "1", "fieldname": "enabled", "fieldtype": "Check", "label": "Yoqilgan"}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Report Service Ichki Karta",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "Accounts Manager", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "client_name",
+ "track_changes": 1
+}

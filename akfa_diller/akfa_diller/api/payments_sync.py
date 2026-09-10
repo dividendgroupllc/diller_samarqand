@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 
 import frappe
 import requests
-from frappe.utils import getdate, today
+from frappe.utils import flt, getdate, today
 
 from akfa_diller.akfa_diller.api.report_service_sync import _get_or_create_customer
 from akfa_diller.akfa_diller.services import report_service_client
@@ -113,6 +113,65 @@ def _kassa_map():
         out[key] = r.account
         out[("__mop__",) + key] = r.mode_of_payment
     return out
+
+
+# ---------------------------------------------------------------- ichki kartalar
+# Zavod POS'ida filiallar bir-biriga "klient" bo'lib ko'rinadi (foydalanuvchi
+# jadvali 2026-09-10): asosiy ofis lentasida "Самарканд-1 (Акмал ака )(Ш) Булунгур",
+# filial lentasida esa asosiy ofis "Sam baza"/"Самарканд-1" nomi bilan. Bunday
+# qatorlar mijoz/ta'minotchi emas — bitta kompaniya ichidagi PUL KO'CHIRMASI.
+
+def _ichki_kartalar():
+	"""{klient nomi: qator} — Report Service Ichki Karta jadvalidan."""
+	out = {}
+	for r in frappe.get_all("Report Service Ichki Karta", filters={"enabled": 1},
+	                        fields=["client_name", "rol", "label", "dealer_id", "company",
+	                                "naqd_account", "bank_account", "karta_account"]):
+		out[(r.client_name or "").strip()] = r
+	return out
+
+
+_KANAL_BANK = ("перечисл", "пречесл", "perechis", "perechesl", "bank", "банк")
+_KANAL_KARTA = ("пластик", "plastik", "karta", "карта", "click", "клик", "terminal", "терминал")
+
+
+def _kanal(kassa_label):
+	"""Asosiy registr nomidan pul kanalini aniqlash: bank / karta / naqd."""
+	s = (kassa_label or "").lower()
+	if any(x in s for x in _KANAL_BANK):
+		return "bank"
+	if any(x in s for x in _KANAL_KARTA):
+		return "karta"
+	return "naqd"
+
+
+def _qarshi_nom(r, ptype):
+	"""Qator bo'yicha QARSHI tomon nomi (kassa registri emas)."""
+	nom = r.get("fromClient") if ptype == "RECEIPT" else r.get("toClient")
+	return (nom or "").strip()
+
+
+def _qarshi_hisob(karta, kassa_label):
+	"""Ichki karta + kanal -> qarshi tomon hisobi (bo'sh bo'lsa naqd hisob)."""
+	k = _kanal(kassa_label)
+	return karta.get(k + "_account") or karta.get("naqd_account")
+
+
+def _bucket_sum_sql(did, kassa, bcur, account, sana=None, dan=None, gacha=None):
+	"""ERPNext bucket summasi SCHOT nuqtai nazaridan: Receive/Pay/Internal Transfer —
+	uchalasi ham to'g'ri sanaladi (paid_to = +, paid_from = -)."""
+	shart = "and custom_rs_date = %(sana)s" if sana else "and custom_rs_date between %(dan)s and %(gacha)s"
+	return frappe.db.sql(
+		f"""
+		select coalesce(sum(case when paid_to = %(acc)s then received_amount
+		                         when paid_from = %(acc)s then -paid_amount else 0 end), 0)
+		from `tabPayment Entry`
+		where docstatus = 1 and custom_rs_dealer = %(did)s and custom_rs_kassa = %(kassa)s
+		  and coalesce(custom_rs_currency, '') = %(cur)s {shart}
+		""",
+		{"acc": account, "did": did, "kassa": kassa, "cur": bcur or "",
+		 "sana": sana, "dan": dan, "gacha": gacha},
+	)[0][0]
 
 
 def _resolve_mop(kassa_map, did, label, currency):
@@ -243,6 +302,7 @@ def sync_payments(days=None, dealer_ids=None):
         return
     _ensure_custom_fields()
     kassa_map = _kassa_map()
+    ichki = _ichki_kartalar()
     if not kassa_map:
         _log_once("Payments sync: xarita bo'sh",
                   "Report Service Kassa Account'da birorta yozuv yo'q -- sinxron ishlamaydi.")
@@ -290,6 +350,13 @@ def sync_payments(days=None, dealer_ids=None):
                     f"paymentType={ptype} -- bu tur hali sinxron qilinmaydi (qo'lda ko'rib chiqiladi).",
                 )
                 continue
+            # Filial lentasidagi ASOSIY OFIS kartasi (egizak): bu harakat asosiy
+            # tomonda allaqachon yozilgan -- ikki marta yozilmasin. Qator bucket'ga
+            # umuman kirmaydi, shuning uchun 0=0 taqqoslovi buzilmaydi.
+            qarshi = _qarshi_nom(r, ptype)
+            ik = ichki.get(qarshi)
+            if ik and ik.rol == "Asosiy (egizak)":
+                continue
             currency = (r.get("currency") or "").strip() or None
             if not _resolve_account(kassa_map, did, kassa, currency):
                 _log_once(
@@ -326,15 +393,7 @@ def sync_payments(days=None, dealer_ids=None):
                 api_sum += amt * (-1 if (r.get("paymentType") or "").upper() == "PAYMENT" else 1)
             api_sum = round(api_sum, 2)
 
-            erp = frappe.db.sql(
-                """
-                select coalesce(sum(case when payment_type = 'Receive' then received_amount else -paid_amount end), 0)
-                from `tabPayment Entry`
-                where docstatus = 1 and custom_rs_dealer = %s and custom_rs_kassa = %s
-                  and custom_rs_date = %s and coalesce(custom_rs_currency, '') = %s
-                """,
-                (did, kassa, pdate, bcur or ""),
-            )[0][0]
+            erp = _bucket_sum_sql(did, kassa, bcur, b_account, sana=pdate)
             erp_sum = round(float(erp or 0), 2)
 
             if abs(api_sum - erp_sum) < 0.01:
@@ -490,6 +549,7 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
 
     from akfa_diller.akfa_diller.api.report_service_sync import _get_or_create_supplier
 
+    ichki = _ichki_kartalar()
     kun_kursi = _kun_kursi(branch.company, pdate)
     for r in brows:
         currency = (r.get("currency") or "").strip() or None
@@ -501,11 +561,36 @@ def _rebuild_bucket(branch, did, kassa, pdate, bcur, kassa_map, brows, settings)
             continue
         company = frappe.db.get_value("Account", account, "company")
         ptype = (r.get("paymentType") or "").upper()
+        # filiallararo ichki ko'chirma (zavod POS'ida filial "klient" bo'lib ko'rinadi)
+        karta = ichki.get(_qarshi_nom(r, ptype))
+        if karta and karta.rol == "Filial":
+            qarshi = _qarshi_hisob(karta, kassa)
+            if not qarshi:
+                _log_once(f"Payments sync: ichki karta hisobsiz ({karta.client_name})",
+                          "Report Service Ichki Karta'da naqd hisob to'ldirilmagan.")
+                karta = None
+            elif frappe.db.get_value("Account", qarshi, "company") != company:
+                # kompaniyalararo (masalan S1 -> Ishtixon): ERPNext ichki ko'chirmasi
+                # bir kompaniya ichida bo'ladi -- eski usul (mijoz/ta'minotchi) qoladi
+                _log_once(f"Payments sync: kompaniyalararo ichki karta ({karta.client_name})",
+                          f"{qarshi} ({frappe.db.get_value('Account', qarshi, 'company')}) != {company} -- mijoz sifatida yozildi.")
+                karta = None
+        else:
+            karta = None
         try:
             pe = frappe.new_doc("Payment Entry")
             pe.company = company
             pe.posting_date = pdate
-            if ptype == "PAYMENT":
+            if karta:
+                # PUL KO'CHIRMASI: party yo'q, ikkala tomon ham o'z kassa hisobi
+                pe.payment_type = "Internal Transfer"
+                qarshi = _qarshi_hisob(karta, kassa)
+                if amount >= 0:      # pul shu registrga KIRDI -> filialdan keladi
+                    pe.paid_from, pe.paid_to = qarshi, account
+                else:                # pul shu registrdan CHIQDI -> filialga ketadi
+                    pe.paid_from, pe.paid_to = account, qarshi
+                pe.paid_amount = pe.received_amount = abs(amount)
+            elif ptype == "PAYMENT":
                 # kassadan chiqim -- toClient odatda ta'minotchi (BAZA).
                 # MINUS summali PAYMENT esa teskarisi: bazadan kassaga qaytim
                 # (jonli misol: "narx farqi -1008$") -> Receive from Supplier.
@@ -679,6 +764,189 @@ def bootstrap_kassa_mappings():
     print(f"Yaratildi={created}, mavjud={skipped}, schot-topilmadi={noacc}")
 
 
+_ICHKI_SEED = [
+	# (klient nomi, rol, filial nomi, dealer_id, kompaniya, naqd, bank, karta)
+	("Самарканд-1 (Акмал ака )(Ш) Булунгур  8811", "Filial", "Bulungur", "56", "Samarqand Diller",
+	 "Bulungur NAQT USD - SD", None, None),
+	("Самарканд-1 (Акмал ака )(Ш) Жомбой 6060", "Filial", "Jomboy", "57", "Samarqand Diller",
+	 "Jomboy NAQT USD - SD", "Jomboy Perechesleniya USD - SD", None),
+	("Самарканд-1 (Акмал ака )(Ш)Чупон ота 0667", "Filial", "Cho'pon ota", "58", "Samarqand Diller",
+	 "Chopon Ota NAQT USD - SD", "Chopon Ota Perechesleniya USD - SD", "Chopon ota Plastik USD - SD"),
+	("Самарканд-1 (Акмал ака )(Ш) Ургут 2200", "Filial", "Urgut 1", "63", "Samarqand Diller",
+	 "Urgur1 NAQT USD - SD", "Urgur1 Perechesleniya USD - SD", None),
+	("Самарканд-1 Ургут 2 KOMIL (+998 99 054 3020)", "Filial", "Urgut 2", "234", "Samarqand Diller",
+	 "Urgut2  NAQT USD - SD", "Urgut2 Perechesleniya USD - SD", "Urgut2 Plastik USD - SD"),
+	("Самарканд-1 (Акмал ака )(Ш) Нуробод 2877", "Filial", "Nurobod", "161", "Samarqand Diller",
+	 "Nurobod NAQT USD - SD", None, None),
+	("Ishtixon Filial (+998 97 915 0006)", "Filial", "Ishtixon", "97", "Kattaqo'rg'on",
+	 "Cash Usd Ishtixon - K", "Ishtixon Perechesleniya USD - K", "Karta Ishtixon - K"),
+	("Метан (ш)(+998 91 553 5685)", "Filial", "Mitan", "59", "Kattaqo'rg'on",
+	 "Cash usd Mitan - K", None, None),
+	("Каттако`рг`он (Акмал ака) (Ш) Мирбозор", "Filial", "Mirbozor", "160", "Kattaqo'rg'on",
+	 "Cash usd Mirbozor - K", None, None),
+	# filial lentasidagi ASOSIY ofis kartalari -- egizak, yozilmaydi
+	("Sam baza (+998 98 273 4232)", "Asosiy (egizak)", "Samarqand-1", "36", "Samarqand Diller", None, None, None),
+	# DIQQAT: "Самарканд-1  (+998 98 273 4232)" (Cho'pon ota lentasi) EGIZAK EMAS —
+	# uning 25 ta Sales Invoice'i bor (haqiqiy savdo kontragenti), shuning uchun
+	# ro'yxatga kiritilmaydi: to'lovlari odatdagidek mijoz-qabuli bo'lib qoladi.
+]
+
+
+def bootstrap_ichki_kartalar():
+	"""Filial-kartalar ro'yxatini yaratish (idempotent). Yangi nomlarni foydalanuvchi
+	«Report Service Ichki Karta» ro'yxatidan o'zi qo'shadi."""
+	yangi = mavjud = 0
+	for nom, rol, label, did, comp, naqd, bank, karta in _ICHKI_SEED:
+		if frappe.db.exists("Report Service Ichki Karta", {"client_name": nom}):
+			mavjud += 1
+			continue
+		if not frappe.db.exists("Company", comp):
+			continue
+		for acc in (naqd, bank, karta):
+			if acc and not frappe.db.exists("Account", acc):
+				frappe.log_error(title="Ichki karta: hisob topilmadi", message=f"{nom} -> {acc}")
+		d = frappe.new_doc("Report Service Ichki Karta")
+		d.update({"client_name": nom, "rol": rol, "label": label, "dealer_id": did, "company": comp,
+		          "naqd_account": naqd if naqd and frappe.db.exists("Account", naqd) else None,
+		          "bank_account": bank if bank and frappe.db.exists("Account", bank) else None,
+		          "karta_account": karta if karta and frappe.db.exists("Account", karta) else None,
+		          "enabled": 1})
+		d.flags.ignore_permissions = True
+		d.insert()
+		yangi += 1
+	frappe.db.commit()
+	print(f"Ichki kartalar: {yangi} yangi, {mavjud} allaqachon bor")
+	return yangi
+
+
+def ichki_transfer_tahlil():
+	"""QURUQ HISOB (hech narsa o'zgarmaydi): mavjud PE'lardan qanchasi ichki
+	ko'chirmaga aylanadi va kassa qoldiqlari qanday bo'ladi."""
+	ichki = _ichki_kartalar()
+	filial = {k: v for k, v in ichki.items() if v.rol == "Filial"}
+	egizak = {k: v for k, v in ichki.items() if v.rol != "Filial"}
+	print("=== 1. Ichki ko'chirmaga aylanadigan PE'lar (asosiy ofis lentasi)")
+	jami = 0.0
+	tafsil = {}
+	for nom, karta in filial.items():
+		rows = frappe.db.sql("""select name, custom_rs_dealer did, custom_rs_kassa kassa, payment_type pt,
+			paid_amount pa, received_amount ra, company from `tabPayment Entry`
+			where docstatus=1 and party=%s and party_type in ('Customer','Supplier')""", (nom,), as_dict=True)
+		if not rows:
+			print(f"  {karta.label:<12} {nom[:46]:<46} — qator yo'q")
+			continue
+		s_in = sum(r.ra for r in rows if r.pt == "Receive")
+		s_out = sum(r.pa for r in rows if r.pt == "Pay")
+		neto = s_in - s_out
+		jami += neto
+		for r in rows:
+			acc = _qarshi_hisob(karta, r.kassa)
+			tafsil[acc] = tafsil.get(acc, 0.0) - (r.ra if r.pt == "Receive" else -r.pa)
+		print(f"  {karta.label:<12} {len(rows):>4} PE | kirim {s_in:>12,.2f} | chiqim {s_out:>10,.2f} | sof {neto:>12,.2f}")
+	print(f"  JAMI ichki ko'chirmaga aylanadi: {jami:,.2f} $ (soxta mijoz-krediti shuncha yo'qoladi)")
+	print("\n=== 2. Egizak (filial lentasidagi asosiy ofis) — o'chiriladi")
+	for nom, karta in egizak.items():
+		rows = frappe.db.sql("""select account, count(*) n,
+			coalesce(sum(case when paid_to=account then received_amount when paid_from=account then -paid_amount else 0 end),0) s
+			from (select pe.name, pe.payment_type, pe.paid_amount, pe.received_amount, pe.paid_from, pe.paid_to,
+			      case when pe.payment_type='Receive' then pe.paid_to else pe.paid_from end account
+			      from `tabPayment Entry` pe where pe.docstatus=1 and pe.party=%s) t group by account""", (nom,), as_dict=True)
+		for r in rows:
+			print(f"  {nom[:44]:<44} {r.n:>4} PE | {r.account:<32} {r.s:>+12,.2f} qaytadi")
+			tafsil[r.account] = tafsil.get(r.account, 0.0) - r.s
+	print("\n=== 3. Filial kassa hisoblari: hozir -> keyin")
+	for acc, ozgarish in sorted(tafsil.items(), key=lambda x: x[1]):
+		bal = frappe.db.sql("""select coalesce(sum(debit-credit),0) from `tabGL Entry`
+			where account=%s and is_cancelled=0""", (acc,))[0][0]
+		print(f"  {acc:<38} {float(bal):>12,.2f} -> {float(bal)+ozgarish:>12,.2f}  ({ozgarish:+,.2f})")
+	return jami
+
+
+def ichki_transfer_migratsiya(dry_run=1, limit=0, client_name=None):
+	"""Bir martalik: mavjud PE'larni ichki ko'chirmaga aylantirish.
+
+	«Filial» kartasidagi to'lov  -> Internal Transfer (filial kassasi <-> asosiy registr)
+	«Asosiy (egizak)» kartasidagi -> bekor qilinadi (harakat asosiy tomonda yozilgan)
+
+	bench --site <sayt> execute akfa_diller.akfa_diller.api.payments_sync.ichki_transfer_migratsiya \
+	    --kwargs "{'dry_run': 0}"
+	"""
+	dry_run, limit = int(dry_run), int(limit)
+	ichki = _ichki_kartalar()
+	if not ichki:
+		print("Ichki karta ro'yxati bo'sh — avval bootstrap_ichki_kartalar()")
+		return
+	stat = {"transfer": 0, "bekor": 0, "otkazildi": 0, "xato": 0}
+	summa = 0.0
+	for nom, karta in ichki.items():
+		if client_name and nom != client_name:
+			continue
+		names = frappe.db.sql("""select name from `tabPayment Entry`
+			where docstatus = 1 and party = %s order by posting_date, name""", (nom,), pluck=True)
+		for name in names:
+			if limit and (stat["transfer"] + stat["bekor"]) >= limit:
+				break
+			pe = frappe.get_doc("Payment Entry", name)
+			if pe.references:
+				stat["otkazildi"] += 1
+				print(f"  ! {name}: fakturaga taqsimlangan — tegilmadi")
+				continue
+			if karta.rol != "Filial":
+				if not dry_run:
+					pe.flags.ignore_permissions = True
+					pe.cancel()
+				stat["bekor"] += 1
+				continue
+			registr = pe.paid_to if pe.payment_type == "Receive" else pe.paid_from
+			qarshi = _qarshi_hisob(karta, pe.custom_rs_kassa)
+			if not qarshi or frappe.db.get_value("Account", qarshi, "company") != pe.company:
+				stat["otkazildi"] += 1
+				continue
+			miqdor = flt(pe.received_amount if pe.payment_type == "Receive" else pe.paid_amount, 2)
+			kirim = pe.payment_type == "Receive"   # pul registrga kirdi -> filialdan keladi
+			if dry_run:
+				stat["transfer"] += 1
+				summa += miqdor
+				continue
+			eski = pe.as_dict()
+			try:
+				pe.flags.ignore_permissions = True
+				pe.cancel()
+				yangi = frappe.new_doc("Payment Entry")
+				yangi.update({
+					"company": eski.company, "posting_date": eski.posting_date,
+					"payment_type": "Internal Transfer",
+					"paid_from": qarshi if kirim else registr,
+					"paid_to": registr if kirim else qarshi,
+					"paid_amount": miqdor, "received_amount": miqdor,
+					"mode_of_payment": eski.mode_of_payment, "cost_center": eski.cost_center,
+					"reference_no": eski.reference_no or eski.custom_rs_row_hash,
+					"reference_date": eski.reference_date or eski.posting_date,
+					"remarks": eski.remarks,
+					"custom_rs_dealer": eski.custom_rs_dealer, "custom_rs_kassa": eski.custom_rs_kassa,
+					"custom_rs_date": eski.custom_rs_date, "custom_rs_currency": eski.custom_rs_currency,
+					"custom_rs_row_hash": eski.custom_rs_row_hash,
+				})
+				yangi.flags.ignore_permissions = True
+				yangi.insert()
+				yangi.submit()
+				stat["transfer"] += 1
+				summa += miqdor
+				if stat["transfer"] % 100 == 0:
+					frappe.db.commit()
+					print(f"  ... {stat['transfer']} ta ko'chirma")
+			except Exception as e:
+				frappe.db.rollback()
+				stat["xato"] += 1
+				frappe.log_error(title=f"Ichki transfer migratsiya: {name}", message=str(e)[:900])
+				print(f"  XATO {name}: {str(e)[:120]}")
+	if not dry_run:
+		frappe.db.commit()
+	print(f"\n{'QURUQ HISOB' if dry_run else 'BAJARILDI'}: ichki ko'chirma {stat['transfer']} ({summa:,.2f} $), "
+	      f"egizak bekor {stat['bekor']}, o'tkazildi {stat['otkazildi']}, xato {stat['xato']}")
+	return stat
+
+
 def verify_payments(from_date, to_date):
     """0=0 tasdiq hisoboti: har (filial, kassa, valyuta) bo'yicha API vs ERPNext.
 
@@ -687,6 +955,7 @@ def verify_payments(from_date, to_date):
     """
     settings = frappe.get_single("Report Service Settings")
     kassa_map = _kassa_map()
+    ichki = _ichki_kartalar()
     base_url, token = report_service_client.get_token()
 
     totals = {}  # valyuta -> [api, erp]
@@ -720,6 +989,9 @@ def verify_payments(from_date, to_date):
                 sign = -1
             else:
                 continue
+            ik = ichki.get(_qarshi_nom(r, ptype))
+            if ik and ik.rol == "Asosiy (egizak)":
+                continue  # sinxron ham yozmaydi (harakat asosiy tomonda)
             cur = (r.get("currency") or "").strip() or None
             account = _resolve_account(kassa_map, did, kassa, cur)
             if not account:
@@ -745,16 +1017,8 @@ def verify_payments(from_date, to_date):
             api_by_bucket[bkey] = api_by_bucket.get(bkey, 0) + sign * amt
 
         for (kassa, bcur), api_sum in api_by_bucket.items():
-            erp = frappe.db.sql(
-                """
-                select coalesce(sum(case when payment_type = 'Receive' then received_amount else -paid_amount end), 0)
-                from `tabPayment Entry`
-                where docstatus = 1 and custom_rs_dealer = %s and custom_rs_kassa = %s
-                  and coalesce(custom_rs_currency, '') = %s
-                  and custom_rs_date between %s and %s
-                """,
-                (did, kassa, bcur or "", str(from_date), str(to_date)),
-            )[0][0]
+            v_account = _resolve_account(kassa_map, did, kassa, bcur)
+            erp = _bucket_sum_sql(did, kassa, bcur, v_account, dan=str(from_date), gacha=str(to_date))
             api_sum = round(api_sum, 2)
             erp_sum = round(float(erp or 0), 2)
             diff = round(erp_sum - api_sum, 2)
