@@ -55,6 +55,14 @@ const OD_PERIODS = [
 	{ key: "last_year", label: __("O'tgan yil") },
 ];
 
+//: Zakaz normasi (kun). Zakaz sanasidan boshlab shu muddat ichida topshirilishi
+//: kutiladi — `delivery_date` bo'sh bo'lgan zakazlarda muddat shundan hisoblanadi
+//: (foydalanuvchi 2026-09-10: "norma 7 kun").
+const BD_ZAKAZ_NORMA = 7;
+
+//: Yakuniy holat — bunga yetgan zakaz kechikkan hisoblanmaydi.
+const BD_ZAKAZ_YAKUN = "Topshirildi";
+
 //: Hafta boshi — dushanba. Backend Python `weekday()` dan foydalanadi (Du = 0),
 //: shuning uchun mijoz tomonda ham shunday bo'lishi shart.
 const OD_WEEK_START = 1;
@@ -85,14 +93,55 @@ const BD_VIEWS = [
 	{ key: "umumiy", label: __("Umumiy panel") },
 	{ key: "kunlik", label: __("Kunlik panel") },
 	{ key: "tahlil", label: __("Savdo tahlili") },
-	{ key: "marja", label: __("Marja va rentabellik") },
+	// Kalit "marja" bo'lib qoladi (saqlangan tanlov va BD_TAHLIL_OILA shunga
+	// bog'langan), faqat ko'rinadigan nom o'zgardi.
+	{ key: "marja", label: __("Moliya") },
 	{ key: "tovarlar", label: __("Tovarlar tahlili") },
 	{ key: "mijozlar", label: __("Mijozlar tahlili") },
+	{ key: "ombor", label: __("Ombor tahlili") },
 ];
 
 //: get_tahlil ma'lumotidan oziqlanadigan panellar (bitta so'rov — Redis kesh
 //: tufayli panellar orasida almashish serverga qayta bormaydi)
 const BD_TAHLIL_OILA = ["tahlil", "marja", "tovarlar", "mijozlar"];
+
+//: «Mijozlar ulushi» pirogida nechta mijoz alohida chiqadi (qolgani —
+//: «Boshqalar» bitta bo'lak bo'lib qo'shiladi).
+const BD_ULUSH_TOP = 6;
+
+//: Pirog bo'laklari — jadvaldagi rang-nishonlar bilan AYNAN bir tartibda.
+const BD_ULUSH_RANGLAR = [
+	OD_COLORS.primary,
+	OD_COLORS.success,
+	OD_COLORS.violet,
+	OD_COLORS.warning,
+	OD_COLORS.info,
+	OD_COLORS.danger,
+];
+
+//: ABC/XYZ sinflarining oddiy til bilan ma'nosi — nishon yonida chiqadi,
+//: shunda "A" yoki "Z" nimani anglatishini eslab o'tirish shart emas.
+const BD_SINF_NOM = {
+	A: __("asosiy"),
+	B: __("o'rta"),
+	C: __("mayda"),
+	X: __("muntazam"),
+	Y: __("o'zgaruvchan"),
+	Z: __("tasodifiy"),
+};
+
+//: Matritsa katagi uchun tavsiya (title): guruh bilan nima qilish kerak.
+const BD_SINF_TAVSIYA = {
+	AX: __("Eng qimmatli: katta va muntazam — shaxsiy xizmat, shartnoma-chegirma"),
+	AY: __("Katta, lekin tebranadi — rejali aloqa va zaxira kafolati"),
+	AZ: __("Katta, lekin tasodifiy — takroriy savdoga aylantirish zaxirasi"),
+	BX: __("O'rta va muntazam — o'stirish uchun eng qulay guruh"),
+	BY: __("O'rta, tebranadi — mavsumni kuzatib boring"),
+	BZ: __("O'rta va tasodifiy — eslatma/aksiya bilan qaytaring"),
+	CX: __("Mayda, lekin muntazam — standart xizmat yetarli"),
+	CY: __("Mayda va tebranuvchan — e'tibor minimal"),
+	CZ: __("Mayda va tasodifiy — faqat ommaviy aksiya"),
+};
 
 const BD_OYLAR = [
 	__("Yanvar"), __("Fevral"), __("Mart"), __("Aprel"), __("May"), __("Iyun"),
@@ -257,6 +306,14 @@ class BiznesDashboard {
 			tahlil_yil: null,
 			tahlil_oylar: [],
 			tahlil_metrika: bd_saqlash.get("bd:tahlil-metrika", "savdo"),
+			// Zakazlar bloki filtrlari (faqat mijoz tomonda, qayta so'rovsiz)
+			zakaz_holat: null,
+			zakaz_kech: false,
+			// Mijozlar qarzi ro'yxati (qidiruv/saralash/sahifalash serverda)
+			mijoz_qidiruv: "",
+			mijoz_sahifa: 1,
+			mijoz_tartib: "qarz",
+			mijoz_yonalish: "desc",
 			period: "custom",
 			from_date: OD_DATE.str(OD_DATE.add_days(OD_DATE.today(), -29)),
 			to_date: OD_DATE.str(OD_DATE.today()),
@@ -336,6 +393,17 @@ class BiznesDashboard {
 		return items
 			.map((e) => `<span class="od-cur">${od.money(e.amount, e.currency)}</span>`)
 			.join("");
+	}
+
+	/** Bir nechta pul-ro'yxatini valyuta bo'yicha qo'shadi (jamlanma chiplari uchun). */
+	money_jami(lists) {
+		const bag = {};
+		(lists || []).forEach((value) => {
+			od.money_list(value).forEach((e) => {
+				bag[e.currency] = (bag[e.currency] || 0) + flt(e.amount);
+			});
+		});
+		return Object.keys(bag).map((currency) => ({ currency, amount: bag[currency] }));
 	}
 
 	/** Ro'yxatdagi eng katta summaning valyutasi (backend shu tartibda beradi). */
@@ -481,6 +549,13 @@ class BiznesDashboard {
 	// -- filtrlar ----------------------------------------------------------
 
 	render_filters() {
+		// Toolbar HTML'i butunlay almashtiriladi — kalendar popoveri (va uning
+		// air-datepicker nusxasi) DOM'dan uzilib qoladi. Eski havolalar qolsa,
+		// `open_calendar()` uzilgan tugunga `is-open` qo'shib, hech narsa
+		// ko'rinmasdi (kompaniya/filial almashtirilgandan keyin kalendar
+		// "ishlamay qolardi"). Shuning uchun har qayta chizishda tozalaymiz.
+		this.destroy_calendar();
+
 		const companies = this.meta.companies || [];
 		const chips = companies.length > 1
 			? `<div class="od-toolbar__row bd-companies">${companies
@@ -556,7 +631,13 @@ class BiznesDashboard {
 		// });
 		// this.make_link_control("customer", __("Mijoz"), "Customer");
 
-		this.bind_filter_events();
+		// Ishlovchilar $toolbar'ning O'ZIGA delegatsiya qilinadi va u qayta
+		// chizishdan omon qoladi — qayta bog'lansa, ular ustma-ust tushib bitta
+		// bosish ikki marta ishlardi (kalendar ochilib, darhol yopilardi).
+		if (!this._filters_bound) {
+			this.bind_filter_events();
+			this._filters_bound = true;
+		}
 	}
 
 	// ===================================================================
@@ -625,6 +706,10 @@ class BiznesDashboard {
 			this.state.kun_tanlangan = null;
 			this.state.tahlil_yil = null;
 			this.state.tahlil_oylar = [];
+			this.state.zakaz_holat = null;
+			this.state.zakaz_kech = false;
+			this.state.mijoz_qidiruv = "";
+			this.state.mijoz_sahifa = 1;
 			this.apply_saved_filial();
 			this.render_filters();
 			this.$kpis.addClass("od-kpis--loading").html(this.skeleton_cards(8));
@@ -790,6 +875,16 @@ class BiznesDashboard {
 		$(document).off("mousedown.odcal keydown.odcal");
 	}
 
+	/** Popoverni butunlay yo'q qilish (toolbar qayta chizilganda). */
+	destroy_calendar() {
+		this.close_calendar();
+		if (this.picker && this.picker.destroy) this.picker.destroy();
+		this.picker = null;
+		if (this.$pop) this.$pop.remove();
+		this.$pop = null;
+		this.pending = null;
+	}
+
 	/** Kalendar tanlovini joriy holatga moslash (qo'llashni ishga tushirmasdan). */
 	sync_calendar() {
 		if (!this.picker) return;
@@ -873,6 +968,9 @@ class BiznesDashboard {
 	async refresh(options) {
 		if (this.state.view === "kunlik") {
 			return this.refresh_daily(options);
+		}
+		if (this.state.view === "ombor") {
+			return this.refresh_ombor(options);
 		}
 		if (BD_TAHLIL_OILA.includes(this.state.view)) {
 			return this.refresh_tahlil(options);
@@ -1487,6 +1585,139 @@ class BiznesDashboard {
 		});
 	}
 
+	// -- OMBOR TAHLILI: qoldiq item-guruhi kesimida ------------------------
+
+	async refresh_ombor(options) {
+		const token = (this._request = (this._request || 0) + 1);
+		const stale = () => token !== this._request;
+		const force = options && options.force;
+		this.$toolbar.find(".od-refresh").addClass("is-busy");
+		try {
+			const data = await this.call("get_ombor", {
+				filters: {
+					company: this.state.company,
+					cost_center: this.state.cost_center,
+					warehouse: this.state.warehouse,
+					// Qoldiq — holat ko'rsatkichi, doim bugungi sanaga
+					period: "custom",
+					from_date: frappe.datetime.get_today(),
+					to_date: frappe.datetime.get_today(),
+					refresh: force ? 1 : 0,
+				},
+			});
+			if (stale()) return;
+			this.render_ombor(data);
+		} catch (error) {
+			if (stale()) return;
+			console.error("[oyna-dashboard] ombor", error); // eslint-disable-line no-console
+			this.$sections.html(
+				`<div class="od-fatal">${__("Ma'lumotlarni yuklashda xatolik yuz berdi.")}</div>`
+			);
+		} finally {
+			if (!stale()) this.$toolbar.find(".od-refresh").removeClass("is-busy");
+		}
+	}
+
+	render_ombor(data) {
+		Object.values(this.charts).forEach((c) => c && c.destroy && c.destroy());
+		this.charts = {};
+
+		this.$sections.html(
+			`<div class="od-block od-block--full bd-ombor" data-block="ombor"></div>`
+		);
+		const $body = this.block_shell(
+			"ombor",
+			__("Ombor tahlili"),
+			__("Qoldiq {0} holatiga · item guruhlari kesimida", [
+				frappe.datetime.str_to_user((data || {}).sana),
+			])
+		);
+		if (!this.guard(data, $body)) return;
+
+		const cur = data.valyuta || "USD";
+		const rows = data.rows || [];
+		const jami = data.jami || {};
+		if (!rows.length) {
+			$body.html(this.empty_state(__("Omborda qoldiq yo'q.")));
+			return;
+		}
+
+		const chips = `
+			<div class="od-statechips">
+				<div class="od-statechip od-statechip--green">
+					<span class="od-statechip__name">${__("Ombor qiymati")}</span>
+					<b>${od.money(jami.qiymat, cur)}</b>
+					<span class="od-statechip__sum">${
+						jami.ombor ? od.esc(jami.ombor) : __("barcha omborlar")
+					}</span>
+				</div>
+				<div class="od-statechip od-statechip--blue">
+					<span class="od-statechip__name">${__("Item guruhlari")}</span>
+					<b>${od.number(jami.guruhlar)}</b>
+					<span class="od-statechip__sum">${od.number(jami.pozitsiya)} ${__("item turi")}</span>
+				</div>
+				<div class="od-statechip od-statechip--${jami.minus ? "red" : "green"}">
+					<span class="od-statechip__name">${__("Minusdagi pozitsiyalar")}</span>
+					<b class="${jami.minus ? "od-bad" : ""}">${od.number(jami.minus)}</b>
+					<span class="od-statechip__sum">${__("item-ombor kesimida")}</span>
+				</div>
+			</div>`;
+
+		const jadval_rows = rows.map((row, index) => ({
+			nr: od.number(index + 1),
+			guruh: `<b>${od.esc(row.guruh)}</b>`,
+			pozitsiya: od.number(row.pozitsiya),
+			qty: row.birlik ? od.qty(row.qty, row.birlik) : od.number(row.qty, 1),
+			qiymat: od.money(row.qiymat, cur),
+			ulush:
+				row.ulush === null || row.ulush === undefined
+					? "—"
+					: `<span class="od-share"><i style="width:${Math.max(
+							row.ulush,
+							0
+					  )}%"></i>${od.percent(row.ulush)}</span>`,
+			minus: row.minus
+				? `<span class="od-bad">${od.number(row.minus)}</span>`
+				: "—",
+			_class: index >= 20 ? "od-row-extra" : "",
+		}));
+
+		jadval_rows.push({
+			nr: "",
+			guruh: `<b>${__("JAMI")}</b>`,
+			pozitsiya: `<b>${od.number(jami.pozitsiya)}</b>`,
+			qty: "",
+			qiymat: `<b>${od.money(jami.qiymat, cur)}</b>`,
+			ulush: "",
+			minus: jami.minus ? `<b class="od-bad">${od.number(jami.minus)}</b>` : "",
+			_class: "bd-total-row",
+		});
+
+		$body.html(`
+			${chips}
+			<div class="od-table-wrap" data-table="ombor"></div>
+		`);
+
+		$body.find('[data-table="ombor"]').html(
+			this.table(
+				[
+					{ key: "nr", label: "#" },
+					{ key: "guruh", label: __("Item guruhi") },
+					{ key: "pozitsiya", label: __("Item turi"), align: "right" },
+					{ key: "qty", label: __("Miqdor"), align: "right" },
+					{ key: "qiymat", label: __("Qiymat"), align: "right" },
+					{ key: "ulush", label: __("Ulush"), align: "right" },
+					{ key: "minus", label: __("Minus"), align: "right" },
+				],
+				jadval_rows
+			)
+		);
+
+		this.setup_table_toggle(
+			this.$sections.find('[data-table="ombor"]'), jadval_rows.length - 1, 20
+		);
+	}
+
 	// -- SAVDO TAHLILI: yil/oy filtri + grafik + donut + marja-jadvallar ----
 
 	async refresh_tahlil(options) {
@@ -1520,14 +1751,325 @@ class BiznesDashboard {
 		}
 	}
 
+	// -- MIJOZLAR QARZI: qidiruv + saralash + sahifalash (serverda) ---------
+
+	/** Blok qobig'i. Qidiruv maydoni FAQAT shu yerda chiziladi: ro'yxat har
+	 *  yangilanganda uni ham qayta chizsak, yozayotgan paytda fokus va kursor
+	 *  yo'qolib ketardi. Keyingi yuklashlar faqat [data-mq-body] ni almashtiradi. */
+	mijoz_qarz_shell() {
+		const $block = this.$sections.find('[data-block="mijoz-qarz"]');
+		if (!$block.length || $block.find("[data-mq-body]").length) return $block;
+
+		$block.html(`
+			<div class="od-block__head">
+				<div>
+					<h3 class="od-block__title">${__("Mijozlar qarzi")}</h3>
+					<p class="od-block__subtitle" data-mq-subtitle>${__("Yuklanmoqda...")}</p>
+				</div>
+				<label class="bd-mq__qidiruv">
+					${frappe.utils.icon("search", "sm")}
+					<input type="text" data-mq-qidiruv autocomplete="off"
+						placeholder="${__("Mijozni qidirish")}"
+						value="${od.esc(this.state.mijoz_qidiruv || "")}">
+				</label>
+			</div>
+			<div class="od-block__body">
+				<div data-mq-jami></div>
+				<div data-mq-body>${this.skeleton_block(300)}</div>
+			</div>
+		`);
+		this.bind_mijoz_qarz();
+		return $block;
+	}
+
+	bind_mijoz_qarz() {
+		this.$sections.off(".bdmq");
+
+		// Qidiruv — har harfda serverga bormaslik uchun 350 ms kechikish
+		this.$sections.on("input.bdmq", "[data-mq-qidiruv]", (event) => {
+			const qiymat = event.currentTarget.value;
+			clearTimeout(this._mq_timer);
+			this._mq_timer = setTimeout(() => {
+				this.state.mijoz_qidiruv = qiymat;
+				this.state.mijoz_sahifa = 1;
+				this.load_mijoz_qarz();
+			}, 350);
+		});
+
+		this.$sections.on("click.bdmq", "[data-mq-tartib]", (event) => {
+			const kalit = $(event.currentTarget).data("mq-tartib");
+			if (kalit === this.state.mijoz_tartib) {
+				this.state.mijoz_yonalish = this.state.mijoz_yonalish === "desc" ? "asc" : "desc";
+			} else {
+				this.state.mijoz_tartib = kalit;
+				// Sonli ustunlar kattadan kichikka, ism esa alifbo bo'yicha
+				this.state.mijoz_yonalish = kalit === "nom" ? "asc" : "desc";
+			}
+			this.state.mijoz_sahifa = 1;
+			this.load_mijoz_qarz();
+		});
+
+		this.$sections.on("click.bdmq", "[data-mq-sahifa]", (event) => {
+			const sahifa = cint($(event.currentTarget).data("mq-sahifa"));
+			if (!sahifa || sahifa === this.state.mijoz_sahifa) return;
+			this.state.mijoz_sahifa = sahifa;
+			this.load_mijoz_qarz();
+			const $block = this.$sections.find('[data-block="mijoz-qarz"]');
+			if ($block.length) $block[0].scrollIntoView({ behavior: "smooth", block: "start" });
+		});
+	}
+
+	async load_mijoz_qarz() {
+		const $block = this.mijoz_qarz_shell();
+		if (!$block || !$block.length) return;
+
+		// Eskirgan javob yangisining ustiga chizilmasin (tez yozilgan qidiruv)
+		const token = (this._mq_request = (this._mq_request || 0) + 1);
+		$block.find("[data-mq-body]").addClass("is-busy");
+		const bugun = frappe.datetime.get_today();
+		try {
+			const data = await this.call("get_mijozlar", {
+				filters: {
+					company: this.state.company,
+					cost_center: this.state.cost_center,
+					warehouse: this.state.warehouse,
+					// Qarz — QOLDIQ ko'rsatkich: doim bugungi holatga.
+					period: "custom",
+					from_date: bugun,
+					to_date: bugun,
+					// Aylanma esa paneldagi yil/oy tanlovi bo'yicha
+					yil: this.state.tahlil_yil,
+					oylar: this.state.tahlil_oylar,
+					qidiruv: this.state.mijoz_qidiruv || "",
+					sahifa: this.state.mijoz_sahifa || 1,
+					tartib: this.state.mijoz_tartib || "qarz",
+					yonalish: this.state.mijoz_yonalish || "desc",
+				},
+			});
+			if (token !== this._mq_request) return;
+			this.render_mijoz_qarz(data);
+		} catch (error) {
+			if (token !== this._mq_request) return;
+			console.error("[oyna-dashboard] mijoz-qarz", error); // eslint-disable-line no-console
+			$block
+				.find("[data-mq-body]")
+				.removeClass("is-busy")
+				.html(this.empty_state(__("Ro'yxatni yuklashda xatolik yuz berdi."), "solid-warning"));
+		}
+	}
+
+	/** Yil/oy tanlovining o'qiladigan nomi: «Avgust, Sentabr 2026». */
+	davr_nomi(yil, oylar) {
+		const oy = oylar || [];
+		return oy.length
+			? oy.map((o) => BD_OYLAR[o - 1]).join(", ") + " " + yil
+			: __("Butun {0}-yil", [yil]);
+	}
+
+	/** Osilib qolgan kunning ogohlantirish darajasi. */
+	mq_kun_tone(kun) {
+		if (kun === null || kun === undefined) return "";
+		if (kun > 60) return "danger";
+		if (kun > 30) return "warning";
+		if (kun > 14) return "info";
+		return "gray";
+	}
+
+	render_mijoz_qarz(data) {
+		const $block = this.$sections.find('[data-block="mijoz-qarz"]');
+		if (!$block.length) return;
+		if (!this.guard(data, $block.find("[data-mq-body]").removeClass("is-busy"))) return;
+
+		const cur = data.valyuta || "UZS";
+		// So'm butun son bilan, dollar 2 kasr bilan o'qiladi
+		const pul = (qiymat) => od.money(qiymat, cur, cur === "UZS" ? 0 : 2);
+		const jami = data.jami || {};
+		const rows = data.rows || [];
+		const davr = this.davr_nomi(data.yil, data.oylar);
+		// Server sahifani chegaraga sig'diradi (qidiruvdan keyin sahifa kamayadi)
+		this.state.mijoz_sahifa = data.sahifa;
+
+		$block
+			.find("[data-mq-subtitle]")
+			.text(`${__("Qarz — bugungi holatga")} · ${__("aylanma")}: ${davr}`);
+
+		$block.find("[data-mq-jami]").html(`
+			<div class="od-statechips bd-mq__jami">
+				<div class="od-statechip od-statechip--red">
+					<span class="od-statechip__name">${__("Jami qarz")}</span>
+					<b>${pul(jami.qarz)}</b>
+					<span class="od-statechip__sum">${od.number(jami.qarzdor)} ${__("mijoz")}</span>
+				</div>
+				<div class="od-statechip od-statechip--blue">
+					<span class="od-statechip__name">${__("Avans")}</span>
+					<b>${pul(jami.avans)}</b>
+					<span class="od-statechip__sum">${od.number(jami.avansli)} ${__("mijoz")}</span>
+				</div>
+				<div class="od-statechip od-statechip--orange">
+					<span class="od-statechip__name">${__("Aylanma")} · ${od.esc(davr)}</span>
+					<b>${pul(jami.aylanma)}</b>
+					<span class="od-statechip__sum">${__("qarz ulushi")}: ${
+			jami.ulush === null || jami.ulush === undefined ? "—" : od.percent(jami.ulush)
+		}</span>
+				</div>
+			</div>
+		`);
+
+		const ustunlar = [
+			{ key: "nr", label: "#" },
+			{ key: "nom", label: __("Mijoz"), tartib: "nom" },
+			{ key: "qarz", label: __("Qarz"), align: "right", tartib: "qarz" },
+			{
+				key: "ozgarish",
+				// Qiymat kelmasa `__` "{0}" ni matn sifatida qoldiradi — shuning
+				// uchun zaxira son beriladi (eski kesh bilan ham to'g'ri chiqsin)
+				label: __("{0} kunda", [data.trend_kun || 30]),
+				align: "right",
+				tartib: "ozgarish",
+			},
+			{ key: "tolov", label: __("Oxirgi to'lov") },
+			{ key: "kun", label: __("Osilgan"), align: "right", tartib: "kun" },
+			{ key: "aylanma", label: __("Aylanma"), align: "right", tartib: "aylanma" },
+			{ key: "ulush", label: __("Qarz / aylanma"), align: "right", tartib: "ulush" },
+		];
+
+		const boshi = (data.sahifa - 1) * data.olcham;
+		const jadval_rows = rows.map((row, index) => {
+			const osish = row.yonalish === "up";
+			const ozgarish =
+				row.yonalish === "flat"
+					? "—"
+					: `<span class="${osish ? "od-bad" : "od-good"}">${osish ? "↑" : "↓"} ${pul(Math.abs(row.ozgarish))}${
+							row.ozgarish_pct === null
+								? ""
+								: ` <small>${od.percent(Math.abs(row.ozgarish_pct))}</small>`
+					  }</span>`;
+
+			return {
+				_click: () => {
+					frappe.route_options = {
+						company: this.state.company,
+						party_type: "Customer",
+						party: [row.customer],
+					};
+					frappe.set_route("query-report", "General Ledger");
+				},
+				nr: od.number(boshi + index + 1),
+				nom: `<b>${od.esc(row.nom)}</b>`,
+				qarz:
+					row.qarz > 0
+						? `<b class="od-bad">${pul(row.qarz)}</b>`
+						: row.avans > 0
+						? `<span class="bd-mq__avans">${__("avans")} ${pul(row.avans)}</span>`
+						: "—",
+				ozgarish,
+				tolov: row.oxirgi_tolov
+					? frappe.datetime.str_to_user(row.oxirgi_tolov)
+					: row.tolov_yoq
+					? `<span class="od-bad">${__("to'lov yo'q")}</span>`
+					: "—",
+				kun:
+					row.kun === null || row.kun === undefined
+						? "—"
+						: `<span class="bd-mq__kun bd-mq__kun--${this.mq_kun_tone(
+								row.kun
+						  )}">${od.number(row.kun)} ${__("kun")}</span>`,
+				aylanma: row.aylanma > 0 ? pul(row.aylanma) : "—",
+				ulush:
+					row.ulush === null || row.ulush === undefined
+						? "—"
+						: `<span class="${
+								row.ulush > 70 ? "od-bad" : row.ulush > 30 ? "od-warn" : "od-good"
+						  }">${od.percent(row.ulush)}</span>`,
+			};
+		});
+
+		const bosh_html = ustunlar
+			.map((col) => {
+				const faol = col.tartib && col.tartib === data.tartib;
+				const belgi = faol ? (data.yonalish === "desc" ? " ↓" : " ↑") : "";
+				return `<th class="od-align-${col.align || "left"}${
+					col.tartib ? " bd-mq__th" : ""
+				}${faol ? " is-active" : ""}"${
+					col.tartib ? ` data-mq-tartib="${col.tartib}"` : ""
+				}>${od.esc(col.label)}${belgi}</th>`;
+			})
+			.join("");
+
+		const tana_html = jadval_rows
+			.map((row, index) => {
+				const hujayralar = ustunlar
+					.map(
+						(col) =>
+							`<td class="od-align-${col.align || "left"}">${row[col.key] || "—"}</td>`
+					)
+					.join("");
+				return `<tr data-mq-row="${index}" class="is-clickable">${hujayralar}</tr>`;
+			})
+			.join("");
+
+		const jadval = rows.length
+			? `<div class="od-table-wrap"><table class="od-table bd-mq__table">
+					<thead><tr>${bosh_html}</tr></thead><tbody>${tana_html}</tbody>
+				</table></div>${this.mq_sahifalar(data)}`
+			: this.empty_state(
+					data.qidiruv
+						? __("«{0}» bo'yicha mijoz topilmadi.", [data.qidiruv])
+						: __("Qarzi bor mijoz yo'q."),
+					"filter"
+			  );
+
+		const $body = $block.find("[data-mq-body]").removeClass("is-busy").html(jadval);
+		$body.find("tr[data-mq-row]").on("click", (event) => {
+			const row = jadval_rows[cint($(event.currentTarget).data("mq-row"))];
+			if (row && row._click) row._click();
+		});
+	}
+
+	/** Sahifalash chizig'i: «1 … 4 5 6 … 12» ko'rinishida. */
+	mq_sahifalar(data) {
+		const joriy = data.sahifa;
+		const oxiri = data.sahifalar;
+		const soni = (data.rows || []).length;
+		const dan = (joriy - 1) * data.olcham + (soni ? 1 : 0);
+		const gacha = dan + soni - 1;
+
+		const raqamlar = [];
+		for (let i = 1; i <= oxiri; i += 1) {
+			if (i === 1 || i === oxiri || Math.abs(i - joriy) <= 2) raqamlar.push(i);
+			else if (raqamlar[raqamlar.length - 1] !== "...") raqamlar.push("...");
+		}
+
+		const tugma = (belgi, sahifa, ochiq, faol) =>
+			sahifa === "..."
+				? `<span class="bd-mq__uch">…</span>`
+				: `<button type="button" class="bd-mq__sahifa${faol ? " is-active" : ""}"${
+						ochiq ? ` data-mq-sahifa="${sahifa}"` : " disabled"
+				  }>${belgi}</button>`;
+
+		return `
+			<div class="bd-mq__pager">
+				<span class="bd-mq__hisob">${__("{0} tadan {1}–{2}", [
+					od.number(data.jami_qatorlar),
+					od.number(dan),
+					od.number(gacha),
+				])}</span>
+				<span class="bd-mq__tugmalar">
+					${tugma("‹", joriy - 1, joriy > 1, false)}
+					${raqamlar
+						.map((n) => tugma(n === "..." ? "…" : od.number(n), n, n !== joriy, n === joriy))
+						.join("")}
+					${tugma("›", joriy + 1, joriy < oxiri, false)}
+				</span>
+			</div>`;
+	}
+
 	render_tahlil(data) {
 		const cur = data.currency || "USD";
 		const metrika = this.state.tahlil_metrika || "savdo";
 		const k = data.kpi || {};
 		const oylar = data.oylar || [];
-		const davr_nomi = oylar.length
-			? oylar.map((o) => BD_OYLAR[o - 1]).join(", ") + " " + data.yil
-			: __("Butun {0}-yil", [data.yil]);
+		const davr_nomi = this.davr_nomi(data.yil, oylar);
 
 		const yil_chips = (data.yillar || [data.yil])
 			.map(
@@ -1667,62 +2209,93 @@ class BiznesDashboard {
 				<div class="od-block__body">${donut}</div>
 			</div>`;
 
+		// Qatorlar XOM belgisi bilan chiqadi (avans — minus, kreditor —
+		// minus): shunda ularni qo'shsa aynan "UMUMIY BALANS" chiqadi.
+		const bal = data.balans || {};
+		const boshqa_valyuta = ["naqd", "bank", "mijoz", "ombor", "kreditor"].some((k) =>
+			od.money_list(bal[k]).some((e) => e.currency && e.currency !== cur)
+		);
 		const balans_blok = `
 			<div class="od-block bd-balans">
 				<div class="od-block__head"><div>
 					<h3 class="od-block__title">${__("Balans detallari")}</h3>
 					<p class="od-block__subtitle">${__("Bugungi holat")} · ${od.esc(
-						(data.balans || {}).sana || ""
+						bal.sana || ""
 					)}</p>
 				</div></div>
 				<div class="od-block__body">
 					<div class="bd-balans__rows">
-						<div><span>${__("Naqd kassa")}</span><b>${this.money((data.balans || {}).naqd)}</b></div>
-						<div><span>${__("Plastik / karta")}</span><b>${this.money((data.balans || {}).bank)}</b></div>
-						<div><span>${__((data.balans || {}).mijoz_label || "Mijozlar balansi")}</span><b>${this.money(
-							(data.balans || {}).mijoz
+						<div><span>${__("Naqd kassa")}</span><b>${this.money(bal.naqd)}</b></div>
+						<div><span>${__("Plastik / karta")}</span><b>${this.money(bal.bank)}</b></div>
+						<div><span>${__(bal.mijoz_label || "Mijozlar balansi")}</span><b>${this.money(
+							bal.mijoz
 						)}</b></div>
-						<div><span>${__("Ombor qiymati")}</span><b>${this.money((data.balans || {}).ombor)}</b></div>
-						<div><span>${__("Kreditorlar (minus)")}</span><b>${this.money(
-							(data.balans || {}).kreditor
-						)}</b></div>
+						<div><span>${__("Ombor qiymati")}</span><b>${this.money(bal.ombor)}</b></div>
+						<div><span>${__("Kreditorlar")}${
+							bal.kreditor_ogoh
+								? ` <i class="bd-ogoh" title="${__(
+										"Kreditorlik schyoti debet qoldiqda: to'lov yozilgan, xarid hujjati yo'q bo'lishi mumkin."
+								  )}">!</i>`
+								: ""
+						}</span><b>${this.money(bal.kreditor)}</b></div>
 					</div>
 					${
-						(data.balans || {}).jami === null ||
-						(data.balans || {}).jami === undefined
+						bal.jami === null || bal.jami === undefined
 							? ""
 							: `<div class="bd-balans__jami"><span>${__(
 									"UMUMIY BALANS"
 							  )}</span><b class="${
-									data.balans.jami >= 0 ? "od-good" : "od-bad"
-							  }">${od.money(data.balans.jami, cur)}</b></div>`
+									bal.jami >= 0 ? "od-good" : "od-bad"
+							  }">${od.money(bal.jami, cur)}</b></div>
+							  <div class="bd-balans__izoh">${
+									boshqa_valyuta
+										? __(
+												"Qatorlar schyot valyutasida, JAMI — kompaniya valyutasida ({0}), kurs yozuv sanasi bo'yicha.",
+												[cur]
+										  )
+										: __("Yuqoridagi qatorlar yig'indisi.")
+							  }</div>`
 					}
-					${this.balans_trend_html((data.balans || {}).trend, cur)}
+					${this.balans_trend_html(bal.trend, cur)}
 				</div>
 			</div>`;
 
-		const treemap_blok = `
-			<div class="od-block bd-xarita od-block--full">
+		const ulush_blok = `
+			<div class="od-block bd-ulush od-block--full">
 				<div class="od-block__head"><div>
-					<h3 class="od-block__title">${__("Mijozlar xaritasi")}</h3>
-					<p class="od-block__subtitle">${__("Top-10 mijoz — marja hajmi bo'yicha")} · ${od.esc(
-						davr_nomi
+					<h3 class="od-block__title">${__("Mijozlar ulushi")}</h3>
+					<p class="od-block__subtitle">${__("Eng katta {0} mijoz va qolganlari", [
+						BD_ULUSH_TOP,
+					])} · ${od.esc(davr_nomi)}</p>
+				</div></div>
+				<div class="od-block__body bd-ulush__body">
+					<div class="od-chart od-chart--nolegend" data-chart="mijoz-ulush"></div>
+					<div class="od-table-wrap" data-table="mijoz-ulush"></div>
+				</div>
+			</div>`;
+
+		const reyting_blok = `
+			<div class="od-block bd-reyting od-block--full">
+				<div class="od-block__head"><div>
+					<h3 class="od-block__title">${__("Mijozlar Reytingi")}</h3>
+					<p class="od-block__subtitle">${od.esc(davr_nomi)} · ${__(
+						"ABC — qaysi mijoz pul keltiradi, XYZ — xaridi qanchalik muntazam"
 					)}</p>
 				</div></div>
-				<div class="od-block__body">
-					<div class="bd-treemap">${this.treemap_html(
-						(data.mijozlar || [])
-							.filter((m) => m.marja > 0)
-							.slice(0, 10)
-							.map((m) => ({
-								label: (m.name || "").split("(")[0].trim(),
-								value: m.marja,
-								title: `${m.name} — ${od.money(m.marja, cur)} (${
-									m.marja_pct === null ? "—" : od.percent(m.marja_pct)
-								})`,
-							}))
-					)}</div>
-				</div>
+				<div class="od-block__body">${this.mijoz_reyting_html(
+					data.mijoz_reyting || {}, cur, data.yil, davr_nomi
+				)}</div>
+			</div>`;
+
+		const cross_blok = `
+			<div class="od-block bd-cs od-block--full">
+				<div class="od-block__head"><div>
+					<h3 class="od-block__title">${__("Cross-sell zaxirasi")}</h3>
+					<p class="od-block__subtitle">${od.esc(davr_nomi)} · ${__(
+						"asosiy tovar guruhlaridan mijoz nimani olmayapti"
+					)}</p>
+				</div></div>
+				<div class="od-block__body" data-block="cross-sell"></div>
 			</div>`;
 
 		const marja_blok = `
@@ -1814,18 +2387,28 @@ class BiznesDashboard {
 		const view = this.state.view;
 		let tana;
 		if (view === "marja") {
-			tana = filtrbar + marja_blok + kpi_blok;
+			// Balans detallari shu panelda (foydalanuvchi 2026-09-10)
+			tana = filtrbar + marja_blok + kpi_blok + balans_blok;
 		} else if (view === "tovarlar") {
 			tana = filtrbar + tovar_blok;
 		} else if (view === "mijozlar") {
-			tana = filtrbar + treemap_blok + mijoz_blok;
+			// Qarz ro'yxati ENG PASTDA — «Mijozlar — marja bilan» jadvalidan
+			// keyin (foydalanuvchi 2026-09-10)
+			tana =
+				filtrbar +
+				ulush_blok +
+				reyting_blok +
+				cross_blok +
+				mijoz_blok +
+				`<div class="od-block od-block--full bd-mq" data-block="mijoz-qarz"></div>`;
 		} else {
-			// Savdo tahlili: balans va vozvratlar ham shu yerda (eski joyida)
+			// Savdo tahlili: balans detallari «Moliya» paneliga ko'chdi,
+			// vozvratlar shu yerda qoldi va endi butun kenglikni oladi.
 			tana =
 				filtrbar +
 				`<div class="od-row">${grafik_blok}${donut_blok}</div>` +
 				kpi_blok +
-				`<div class="od-row">${balans_blok}${vozvrat_blok}</div>`;
+				vozvrat_blok;
 		}
 		this.$sections.html(tana);
 		if (view === "tovarlar") {
@@ -1834,14 +2417,19 @@ class BiznesDashboard {
 			);
 		}
 		if (view === "mijozlar") {
+			this.render_cross_sell(data.cross_sell || {}, cur);
 			this.setup_table_toggle(
 				this.$sections.find('[data-table="t-mijozlar"]'), mijoz_rows.length, 15
 			);
+			this.load_mijoz_qarz();
 		}
 
 		// grafik faqat "Savdo tahlili" panelida chiziladi
 		Object.values(this.charts).forEach((c) => c && c.destroy && c.destroy());
 		this.charts = {};
+		if (view === "mijozlar") {
+			this.render_mijoz_ulush(data.mijoz_reyting || {}, cur);
+		}
 		if (view === "tahlil") {
 			const yil_qatlamlari =
 				(metrika === "dona" ? data.dona_yillar : data.oylik_yillar) || [];
@@ -1992,39 +2580,408 @@ class BiznesDashboard {
 		</table></div>`;
 	}
 
-	/** Sodda ikki-qatorli proporsional treemap (kutubxonasiz).
-	 *  Katta 4 tasi yuqori qatorda, qolganlari pastda; kenglik — qiymatga
-	 *  proporsional, rang-intensivlik ham shunga bog'liq. */
-	treemap_html(items) {
-		if (!items || !items.length) return this.empty_state();
-		const jami = items.reduce((a, x) => a + x.value, 0) || 1;
-		const band1 = items.slice(0, Math.min(4, items.length));
-		const band2 = items.slice(band1.length);
-		const max = items[0].value || 1;
+	/** «Cross-sell zaxirasi» — mijoz asosiy tovar guruhlaridan qaysilarini
+	 *  OLMAYAPTI va bu taxminan qancha pul.
+	 *
+	 *  Zaxira server tomonda "hamyondagi ulush" usuli bilan baholanadi: shu
+	 *  guruhni oladigan mijozlarda guruhning aylanmadagi ulushi medianasi
+	 *  olinadi va mijozning davr oborotiga ko'paytiriladi. Yig'indi faqat eng
+	 *  katta 3 ta yo'q guruh bo'yicha — ya'ni aniq ish rejasiga bog'langan. */
+	render_cross_sell(cs, cur) {
+		const $body = this.$sections.find('[data-block="cross-sell"]');
+		if (!$body.length) return;
+		if (!cs.rows || !cs.rows.length) {
+			$body.html(
+				this.empty_state(
+					__("Tanlangan davrda tovar guruhlari bo'yicha ma'lumot yetarli emas.")
+				)
+			);
+			return;
+		}
 
-		const band = (rows) => {
-			const bj = rows.reduce((a, x) => a + x.value, 0) || 1;
-			return `<div class="bd-treemap__band">${rows
-				.map((x) => {
-					// Rang-intensivlik 45%..92% oralig'ida; 60%+ da oq matn,
-					// undan pastda odatiy matn-rang (kontrast buzilmasin).
-					const foiz = 45 + (x.value / max) * 47;
-					const och = foiz < 60;
-					return `<div class="bd-treemap__cell${
-						och ? " bd-treemap__cell--och" : ""
-					}" title="${od.esc(x.title)}"
-						style="flex-grow:${(x.value / bj) * 1000};
-						       background: color-mix(in srgb, var(--bd-primary) ${foiz.toFixed(
-									0
-							  )}%, var(--fg-color))">
-						<span class="bd-treemap__label">${od.esc(x.label.slice(0, 22))}</span>
-						<span class="bd-treemap__value">${od.compact(x.value)}</span>
-						<span class="bd-treemap__pct">${od.percent((x.value / jami) * 100)}</span>
-					</div>`;
+		const n = cs.asosiy_soni || 0;
+		const kpi = `
+			<div class="bd-kpi-strip bd-kpi-strip--zich">
+				<div class="bd-kpi"><span>${__("Asosiy tovar guruhlari")}</span><b>${od.number(
+					n
+				)}</b><small class="bd-reyting__izoh">${__("aylanmaning")} ${od.percent(
+					cs.asosiy_ulush || 0
+				)}</small></div>
+				<div class="bd-kpi"><span>${__("O'rtacha qamrov")}</span><b>${od.number(
+					cs.ortacha_qamrov || 0,
+					1
+				)} / ${od.number(n)}</b><small class="bd-reyting__izoh">${__(
+					"mijoz shuncha guruhdan oladi"
+				)}</small></div>
+				<div class="bd-kpi"><span>${__("Tor assortimentli")}</span><b>${od.number(
+					cs.tor || 0
+				)}</b><small class="bd-reyting__izoh">${__("2 va undan kam guruh oladi")}</small></div>
+				<div class="bd-kpi"><span>${__("Taxminiy zaxira")}</span><b class="od-good">${od.money(
+					cs.zaxira_jami || 0,
+					cur
+				)}</b><small class="bd-reyting__izoh">${__("{0} mijoz bo'yicha jami", [
+					od.number(cs.mijozlar || 0),
+				])}</small></div>
+			</div>`;
+
+		const izoh = `
+			<div class="bd-reyting__xulosa">
+				<div>${__(
+					"Zaxira shunday baholanadi: shu guruhni oladigan mijozlarda guruhning hamyondagi ulushi (mediana) olinib, mijozning davr oboroti bilan ko'paytiriladi — eng katta {0} ta yo'q guruh bo'yicha.",
+					[`<b>${od.number(cs.tavsiya_soni || 3)}</b>`]
+				)}</div>
+			</div>`;
+
+		const guruhlar = `
+			<div class="bd-cs__guruhlar">
+				<span class="bd-cs__guruhlar-nom">${__("Asosiy guruhlar")}:</span>
+				${(cs.asosiy || [])
+					.map(
+						(g) => `<span class="bd-cs__chip" title="${od.esc(g.nom)} — ${od.number(
+							g.xaridor
+						)} ${__("mijoz")}, ${od.money(g.savdo, cur)}">${od.esc(
+							g.nom
+						)}<em>${od.percent(g.ulush)}</em></span>`
+					)
+					.join("")}
+			</div>`;
+
+		const rows = cs.rows.map((r, i) => ({
+			_class: i >= 8 ? "od-row-extra" : "",
+			nr: od.number(i + 1),
+			name: `<i class="bd-sinf bd-sinf--${r.abc}" title="${od.esc(
+				BD_SINF_NOM[r.abc] || ""
+			)}">${r.abc}</i> ${od.esc(r.name)}`,
+			savdo: od.money(r.savdo, cur),
+			qamrov: `<span class="od-share"><i style="width:${
+				n ? (r.qamrov / n) * 100 : 0
+			}%"></i>${od.number(r.qamrov)} / ${od.number(n)}</span>`,
+			yoq: (r.yoq || [])
+				.map(
+					(y) => `<span class="bd-cs__chip bd-cs__chip--yoq" title="${od.esc(
+						y.nom
+					)} — ${__("taxminan")} ${od.money(y.summa, cur)}">${od.esc(y.nom)}</span>`
+				)
+				.join(""),
+			zaxira: `<b class="od-good">${od.money(r.zaxira, cur)}</b>`,
+		}));
+
+		$body.html(
+			kpi +
+				izoh +
+				guruhlar +
+				`<div class="od-table-wrap" data-table="cross-sell">${this.table(
+					[
+						{ key: "nr", label: "#" },
+						{ key: "name", label: __("Mijoz") },
+						{ key: "savdo", label: __("Savdo"), align: "right" },
+						{ key: "qamrov", label: __("Qamrov"), align: "right" },
+						{ key: "yoq", label: __("Olmayotgan asosiy guruhlar") },
+						{ key: "zaxira", label: __("Taxminiy zaxira"), align: "right" },
+					],
+					rows
+				)}</div>`
+		);
+		this.setup_table_toggle($body.find('[data-table="cross-sell"]'), rows.length, 8);
+	}
+
+	/** «Mijozlar ulushi» — Xarajatlar kartasi uslubidagi pirog: eng katta
+	 *  BD_ULUSH_TOP ta mijoz alohida bo'lak, qolgani — «Boshqalar».
+	 *  Donut bo'laklari va jadvaldagi rang-nishonlar bir xil tartibda. */
+	render_mijoz_ulush(reyting, cur) {
+		const $chart = this.$sections.find('[data-chart="mijoz-ulush"]');
+		const $jadval = this.$sections.find('[data-table="mijoz-ulush"]');
+		if (!$chart.length) return;
+
+		const jami = reyting.savdo || 0;
+		const top = (reyting.top || []).filter((m) => m.summa > 0).slice(0, BD_ULUSH_TOP);
+		if (!top.length || jami <= 0) {
+			$chart.closest(".bd-ulush__body").html(
+				this.empty_state(__("Tanlangan davrda mijoz savdosi yo'q."))
+			);
+			return;
+		}
+
+		const boshqa_summa = Math.max(jami - top.reduce((a, m) => a + m.summa, 0), 0);
+		const boshqa_soni = Math.max((reyting.jami || 0) - top.length, 0);
+		const boshqa_bor = boshqa_summa > 0 && boshqa_soni > 0;
+		const qatorlar = top
+			.map((m, i) => ({
+				label: m.name,
+				// Diagramma yorlig'i qisqa bo'lsin — to'liq nomi jadvalda turadi.
+				qisqa: (m.name || "").split("(")[0].trim().slice(0, 20),
+				value: m.summa,
+				rang: BD_ULUSH_RANGLAR[i % BD_ULUSH_RANGLAR.length],
+				izoh: `${m.abc}${reyting.xyz_mavjud ? m.xyz : ""} · ${od.esc(
+					BD_SINF_NOM[m.abc] || ""
+				)}`,
+			}))
+			.concat(
+				boshqa_bor
+					? [
+							{
+								label: __("Boshqalar"),
+								qisqa: __("Boshqalar"),
+								value: boshqa_summa,
+								rang: OD_COLORS.muted,
+								izoh: `${od.number(boshqa_soni)} ${__("mijoz")}`,
+							},
+					  ]
+					: []
+			);
+
+		this.charts.mijoz_ulush = new frappe.Chart($chart[0], {
+			type: "donut",
+			height: 240,
+			animate: false,
+			maxSlices: qatorlar.length,
+			colors: qatorlar.map((q) => q.rang),
+			data: {
+				labels: qatorlar.map((q) => q.qisqa),
+				datasets: [{ values: qatorlar.map((q) => q.value) }],
+			},
+			tooltipOptions: { formatTooltipY: (v) => od.compact(v, cur) },
+		});
+
+		$jadval.html(
+			this.table(
+				[
+					{ key: "name", label: __("Mijoz") },
+					{ key: "summa", label: __("Savdo"), align: "right" },
+					{ key: "ulush", label: __("Ulush"), align: "right" },
+				],
+				qatorlar.map((q) => {
+					const ulush = (q.value / jami) * 100;
+					return {
+						name:
+							`<span class="od-swatch" style="background:${q.rang}"></span>` +
+							`<b>${od.esc(q.label)}</b><small>${q.izoh}</small>`,
+						summa: od.money(q.value, cur),
+						ulush: `<span class="od-share"><i style="width:${Math.max(
+							ulush,
+							0
+						)}%"></i>${od.percent(ulush)}</span>`,
+					};
 				})
-				.join("")}</div>`;
+			)
+		);
+	}
+
+	/** «Mijozlar Reytingi» — davr mijozlari soni + ABC/XYZ tahlili.
+	 *
+	 *  ABC: kim qancha pul keltiradi — aylanmadagi kumulyativ ulush
+	 *  (A — birinchi 80%, B — 95% gacha, C — qolgani).
+	 *  XYZ: xarid qanchalik muntazam — oylik tebranish CV = σ/μ
+	 *  (X ≤ 10%, Y ≤ 25%, Z — undan katta).
+	 *  Sinflar oddiy so'z bilan ham yozib qo'yiladi (BD_SINF_NOM), matritsa
+	 *  kataklarida esa tavsiya chiqadi (BD_SINF_TAVSIYA). */
+	mijoz_reyting_html(r, cur, yil, davr_nomi) {
+		if (!r || !r.jami) {
+			return this.empty_state(__("Tanlangan davrda mijoz bilan ishlanmagan."));
+		}
+
+		const delta = (joriy, oldin) => {
+			if (!oldin) return "";
+			const pct = ((joriy - oldin) / oldin) * 100;
+			if (Math.abs(pct) < 0.05) {
+				return `<span class="od-delta od-delta--flat">0%</span>`;
+			}
+			return `<span class="od-delta od-delta--${pct > 0 ? "good" : "bad"}">${
+				pct > 0 ? "↑" : "↓"
+			} ${od.percent(Math.abs(pct))}</span>`;
 		};
-		return band(band1) + (band2.length ? band(band2) : "");
+
+		const kpi = `
+			<div class="bd-kpi-strip bd-kpi-strip--zich">
+				<div class="bd-kpi"><span>${__("Ishlangan mijozlar")}</span><b>${od.number(
+					r.jami
+				)} ${delta(r.jami, r.otgan_yil)}</b>
+					<small class="bd-reyting__izoh">${yil - 1}${__("-yil shu davr")}: ${od.number(
+						r.otgan_yil || 0
+					)}</small></div>
+				<div class="bd-kpi"><span>${__("Yangi mijozlar")}</span><b>${od.number(
+					r.yangi || 0
+				)}</b><small class="bd-reyting__izoh">${__("birinchi xaridi shu davrda")}</small></div>
+				<div class="bd-kpi"><span>${__("Doimiy mijozlar")}</span><b>${od.number(
+					r.doimiy || 0
+				)}</b><small class="bd-reyting__izoh">${__("ilgari ham xarid qilgan")}</small></div>
+				<div class="bd-kpi"><span>${__("O'rtacha mijoz savdosi")}</span><b>${od.money(
+					r.ortacha || 0,
+					cur
+				)}</b><small class="bd-reyting__izoh">${__("davr aylanmasi")}: ${od.compact(
+					r.savdo || 0,
+					cur
+				)}</small></div>
+			</div>`;
+
+		const legend = (sarlavha, izoh, qatorlar) => `
+			<div class="bd-reyting__legend">
+				<div class="bd-reyting__legend-head">${od.esc(sarlavha)}
+					<small>${od.esc(izoh)}</small></div>
+				${qatorlar
+					.map(
+						(q) => `<div class="bd-reyting__legend-row">
+						<i class="bd-sinf bd-sinf--${q.sinf}">${q.sinf}</i>
+						<span class="bd-reyting__sinf-nom">${od.esc(BD_SINF_NOM[q.sinf] || "")}</span>
+						<span>${od.number(q.soni)} ${__("mijoz")}</span>
+						<em>${od.percent(q.ulush)}</em>
+						<b>${od.money(q.savdo, cur)}</b>
+					</div>`
+					)
+					.join("")}
+			</div>`;
+
+		// 3×3 matritsa: satr — ABC (hajm), ustun — XYZ (barqarorlik). Katak
+		// to'qligi aylanma ulushiga bog'liq (bo'sh kataklar ko'zga tashlanmasin).
+		const matritsa = r.matritsa || {};
+		const eng_katta = Math.max(...Object.values(matritsa).map((c) => c.savdo || 0), 1);
+		const katak = (abc, xyz) => {
+			const c = matritsa[abc + xyz] || { soni: 0, savdo: 0 };
+			const ulush = r.savdo ? (c.savdo / r.savdo) * 100 : 0;
+			const foiz = c.savdo > 0 ? 10 + (c.savdo / eng_katta) * 62 : 0;
+			// To'q katakda matn oq bo'lsin (kontrast buzilmasin).
+			return `<div class="bd-matritsa__katak${c.soni ? "" : " is-bosh"}${
+				foiz >= 45 ? " is-toq" : ""
+			}"
+				title="${abc}${xyz} — ${od.number(c.soni)} ${__("mijoz")}, ${od.money(
+				c.savdo,
+				cur
+			)}&#10;${od.esc(BD_SINF_TAVSIYA[abc + xyz] || "")}"
+				style="background: color-mix(in srgb, var(--bd-primary) ${foiz.toFixed(
+					0
+				)}%, var(--fg-color))">
+				<b>${od.number(c.soni)}</b>
+				<span>${c.soni ? od.percent(ulush) : "—"}</span>
+			</div>`;
+		};
+		const matritsa_html = `
+			<div class="bd-matritsa">
+				<div class="bd-matritsa__sarlavha">${__("ABC × XYZ matritsasi")}
+					<small>${__("katakda: mijozlar soni va aylanmadagi ulushi")}</small></div>
+				<div class="bd-matritsa__panjara">
+					<span class="bd-matritsa__burchak">${__("hajm")} ↓<br>${__(
+						"barqarorlik"
+					)} →</span>
+					${["X", "Y", "Z"]
+						.map(
+							(x) => `<span class="bd-matritsa__ustun">${x}
+								<small>${od.esc(BD_SINF_NOM[x])}</small></span>`
+						)
+						.join("")}
+					${["A", "B", "C"]
+						.map(
+							(a) =>
+								`<span class="bd-matritsa__satr">${a}
+									<small>${od.esc(BD_SINF_NOM[a])}</small></span>` +
+								["X", "Y", "Z"].map((x) => katak(a, x)).join("")
+						)
+						.join("")}
+				</div>
+			</div>`;
+
+		// Qisqa xulosa — raqamlarni o'qishga vaqt yo'q bo'lsa ham ma'no yetsin.
+		const a_soni = ((r.abc || []).find((x) => x.sinf === "A") || { soni: 0 }).soni;
+		const a_ulush = r.jami ? (a_soni / r.jami) * 100 : 0;
+		const katak_soni = (k) => (matritsa[k] || {}).soni || 0;
+		const xulosa = `
+			<div class="bd-reyting__xulosa">
+				<div>${__("Aylanmaning 80%ini {0} ta mijoz beradi — bu jamining {1}i.", [
+					`<b>${od.number(a_soni)}</b>`,
+					`<b>${od.percent(a_ulush)}</b>`,
+				])}</div>
+				${
+					r.xyz_mavjud
+						? `<div>${__(
+								"Shu asosiy mijozlarning {0} tasi muntazam xarid qiladi, {1} tasi tasodifiy — takroriy savdo zaxirasi shu yerda.",
+								[
+									`<b>${od.number(katak_soni("AX") + katak_soni("AY"))}</b>`,
+									`<b>${od.number(katak_soni("AZ"))}</b>`,
+								]
+						  )}</div>`
+						: ""
+				}
+			</div>`;
+
+		const xyz_baza = r.xyz_davr
+			? __("davr oylari bo'yicha")
+			: __("{0}-yilning {1} faol oyi bo'yicha", [yil, od.number(r.xyz_oylar || 0)]);
+
+		const top_rows = (r.top || []).map((m, i) => ({
+			nr: od.number(i + 1),
+			name: od.esc(m.name),
+			summa: od.money(m.summa, cur),
+			ulush: od.percent(m.ulush),
+			kum: m.kumulyativ === null ? "—" : od.percent(m.kumulyativ),
+			oylar: od.number(m.oylar || 0),
+			cv: m.cv === null || m.cv === undefined ? "—" : od.percent(m.cv),
+			sinf: `<i class="bd-sinf bd-sinf--${m.abc}" title="${od.esc(
+				BD_SINF_NOM[m.abc]
+			)}">${m.abc}</i>${
+				r.xyz_mavjud
+					? `<i class="bd-sinf bd-sinf--${m.xyz}" title="${od.esc(
+							BD_SINF_NOM[m.xyz]
+					  )}">${m.xyz}</i>`
+					: ""
+			}`,
+		}));
+
+		const top_jadval = this.table(
+			[
+				{ key: "nr", label: "#" },
+				{ key: "name", label: __("Mijoz") },
+				{ key: "sinf", label: __("Sinf") },
+				{ key: "summa", label: __("Savdo"), align: "right" },
+				{ key: "ulush", label: __("Ulush"), align: "right" },
+				{ key: "kum", label: __("Kumulyativ"), align: "right" },
+			]
+				// CV va faol-oy ustunlari XYZ bazasi bo'lgandagina ma'noli.
+				.concat(
+					r.xyz_mavjud
+						? [
+								{
+									key: "oylar",
+									label: `${__("Faol oy")} / ${od.number(r.xyz_oylar || 0)}`,
+									align: "right",
+								},
+								{ key: "cv", label: __("CV"), align: "right" },
+						  ]
+						: []
+				),
+			top_rows
+		);
+
+		return `
+			${kpi}
+			${xulosa}
+			<div class="bd-reyting__grid${r.xyz_mavjud ? "" : " is-yakka"}">
+				${r.xyz_mavjud ? matritsa_html : ""}
+				<div class="bd-reyting__legendlar">
+					${legend(
+						__("ABC — aylanmadagi ulushi"),
+						__("A: birinchi 80% · B: 95% gacha · C: qolgani"),
+						r.abc || []
+					)}
+					${
+						r.xyz_mavjud
+							? legend(
+									__("XYZ — oylik barqarorlik (CV)"),
+									`${__("X: ≤10% · Y: ≤25% · Z: >25%")} · ${xyz_baza}`,
+									r.xyz || []
+							  )
+							: `<div class="bd-reyting__legend"><div class="bd-reyting__legend-head">${__(
+									"XYZ — oylik barqarorlik (CV)"
+							  )}<small>${__(
+									"hisoblash uchun kamida ikkita faol oy kerak"
+							  )}</small></div></div>`
+					}
+				</div>
+			</div>
+			<div class="bd-reyting__top">
+				<div class="bd-reyting__top-head">${__("Top mijozlar")} · ${od.esc(
+					davr_nomi
+				)}</div>
+				${top_jadval}
+			</div>`;
 	}
 
 	// -- Filiallar jadvali (trade) ----------------------------------------
@@ -2398,25 +3355,54 @@ class BiznesDashboard {
 
 	// -- 2a. Zakazlar ro'yxati (holati bilan) -------------------------------
 
+	/** Zakaz muddati: `delivery_date`, u bo'sh bo'lsa zakaz sanasi + norma. */
+	zakaz_muddat(row) {
+		if (row.delivery_date) return row.delivery_date;
+		if (!row.date) return null;
+		return OD_DATE.str(OD_DATE.add_days(OD_DATE.obj(row.date), BD_ZAKAZ_NORMA));
+	}
+
+	/** Muddatidan necha kun o'tgani. 0 — kechikmagan (yoki topshirilgan/bekor). */
+	zakaz_kechikish(row) {
+		if (cint(row.docstatus) === 2 || row.state === BD_ZAKAZ_YAKUN) return 0;
+		const muddat = this.zakaz_muddat(row);
+		if (!muddat) return 0;
+		const kun = Math.round((OD_DATE.today() - OD_DATE.obj(muddat)) / 86400000);
+		return kun > 0 ? kun : 0;
+	}
+
 	render_orders(orders) {
+		// Filtr o'zgarganda serverga qayta bormay, shu ma'lumot ustidan chiziladi.
+		this._zakazlar = orders;
+
+		const barcha = (orders && orders.orders) || [];
+		// Davr/kompaniya almashib, tanlangan holat umuman qolmagan bo'lsa —
+		// filtr o'zini tozalaydi (aks holda jadval sababsiz bo'sh ko'rinardi).
+		if (this.state.zakaz_holat && !barcha.some((row) => row.state === this.state.zakaz_holat)) {
+			this.state.zakaz_holat = null;
+		}
+		const holat = this.state.zakaz_holat;
 		const action = this.link_button(__("Barcha zakazlar"), () => {
 			frappe.route_options = {
 				company: this.state.company,
 				transaction_date: ["between", [this.context.from_date, this.context.to_date]],
 			};
+			// Holat filtri yoqilgan bo'lsa — ro'yxatga ham o'shanday tushsin
+			if (holat) frappe.route_options.workflow_state = holat;
 			frappe.set_route("List", "Sales Order");
 		});
 
 		const $body = this.block_shell(
 			"orders",
 			__("Zakazlar"),
-			__("Tanlangan davrdagi barcha zakazlar va ularning holati"),
+			__("Tanlangan davrdagi barcha zakazlar va ularning holati · norma {0} kun", [
+				BD_ZAKAZ_NORMA,
+			]),
 			action
 		);
 		if (!this.guard(orders, $body)) return;
 
-		const rows = orders.orders || [];
-		if (!rows.length) {
+		if (!barcha.length) {
 			$body.html(this.empty_state(__("Tanlangan davrda zakaz yo'q.")));
 			return;
 		}
@@ -2425,20 +3411,44 @@ class BiznesDashboard {
 		const pill = (row) =>
 			`<span class="od-pill od-pill--${tone(row.style)}">${od.esc(row.state)}</span>`;
 
-		// Holatlar bo'yicha qisqacha jamlanma
-		const chips = (orders.states || [])
-			.map(
-				(st) => `
-			<div class="od-statechip od-statechip--${tone(st.style)}">
-				<span class="od-statechip__name">${od.esc(st.state)}</span>
-				<b>${od.number(st.orders)} ${__("ta")}</b>
-				<span class="od-statechip__sum">${this.money(st.amount)}</span>
-			</div>`
-			)
-			.join("");
+		// --- filtrlar: holat + "muddatidan o'tib ketgan" ---
+		const kechikish = new Map(barcha.map((row) => [row.name, this.zakaz_kechikish(row)]));
+		const kech_soni = barcha.filter((row) => kechikish.get(row.name) > 0).length;
+		const rows = barcha.filter(
+			(row) =>
+				(!holat || row.state === holat) &&
+				(!this.state.zakaz_kech || kechikish.get(row.name) > 0)
+		);
+
+		const jami_summa = orders.states || [];
+		const chip = (kalit, nom, soni, uslub, summa) => `
+			<button type="button" class="od-statechip od-statechip--${uslub}${
+			(holat || "") === kalit ? " is-active" : ""
+		}" data-holat="${od.esc(kalit)}">
+				<span class="od-statechip__name">${od.esc(nom)}</span>
+				<b>${od.number(soni)} ${__("ta")}</b>
+				<span class="od-statechip__sum">${summa}</span>
+			</button>`;
+
+		const chips =
+			chip(
+				"",
+				__("Hammasi"),
+				barcha.length,
+				"gray",
+				this.money(this.money_jami(jami_summa.map((st) => st.amount)))
+			) +
+			jami_summa
+				.map((st) => chip(st.state, st.state, st.orders, tone(st.style), this.money(st.amount)))
+				.join("");
 
 		$body.html(`
-			<div class="od-statechips">${chips}</div>
+			<div class="od-statechips bd-zakaz-filtr">${chips}</div>
+			<label class="bd-kech-filtr${this.state.zakaz_kech ? " is-active" : ""}">
+				<input type="checkbox" data-kech ${this.state.zakaz_kech ? "checked" : ""}>
+				<span>${__("Muddatidan o'tib ketgan")}</span>
+				<b class="${kech_soni ? "od-bad" : ""}">${od.number(kech_soni)} ${__("ta")}</b>
+			</label>
 			<div class="od-table-wrap od-table-wrap--scroll" data-table="orders"></div>
 		`);
 
@@ -2447,6 +3457,7 @@ class BiznesDashboard {
 				[
 					{ label: __("Zakaz"), key: "name" },
 					{ label: __("Zakaz sanasi"), key: "date" },
+					{ label: __("Muddat"), key: "muddat" },
 					{ label: __("Mijoz"), key: "customer" },
 					{ label: __("Kvadrat"), key: "sqm", align: "right" },
 					{ label: __("Summa"), key: "amount", align: "right" },
@@ -2455,30 +3466,60 @@ class BiznesDashboard {
 					{ label: __("Foyda"), key: "foyda", align: "right" },
 					{ label: __("Holat"), key: "state", align: "center" },
 				],
-				rows.map((row) => ({
-					_click: () => frappe.set_route("Form", "Sales Order", row.name),
-					name: `<b>${od.esc(row.name)}</b>`,
-					date: frappe.datetime.str_to_user(row.date),
-					customer: od.esc(row.customer_name),
-					sqm: row.sqm ? od.qty(row.sqm, "m²") : "—",
-					amount: this.money(row.amount),
-					si_sana: row.si_sana ? frappe.datetime.str_to_user(row.si_sana) : "—",
-					tannarx: (row.tannarx || []).length ? this.money(row.tannarx) : "—",
-					foyda: (row.foyda || []).length
-						? `<span class="${
-								(row.foyda[0] || {}).amount >= 0 ? "od-good" : "od-bad"
-						  }">${this.money(row.foyda)}</span>`
-						: "—",
-					state: pill(row),
-				}))
+				rows.map((row) => {
+					const kech = kechikish.get(row.name) || 0;
+					const muddat = this.zakaz_muddat(row);
+					return {
+						_click: () => frappe.set_route("Form", "Sales Order", row.name),
+						_class: kech ? "bd-kech-row" : "",
+						name: `<b>${od.esc(row.name)}</b>`,
+						date: frappe.datetime.str_to_user(row.date),
+						muddat: muddat
+							? `${frappe.datetime.str_to_user(muddat)}${
+									kech
+										? ` <span class="od-bad">+${od.number(kech)} ${__("kun")}</span>`
+										: ""
+							  }`
+							: "—",
+						customer: od.esc(row.customer_name),
+						sqm: row.sqm ? od.qty(row.sqm, "m²") : "—",
+						amount: this.money(row.amount),
+						si_sana: row.si_sana ? frappe.datetime.str_to_user(row.si_sana) : "—",
+						tannarx: (row.tannarx || []).length ? this.money(row.tannarx) : "—",
+						foyda: (row.foyda || []).length
+							? `<span class="${
+									(row.foyda[0] || {}).amount >= 0 ? "od-good" : "od-bad"
+							  }">${this.money(row.foyda)}</span>`
+							: "—",
+						state: pill(row),
+					};
+				})
 			)
 		);
+
+		if (!rows.length) {
+			$body.find('[data-table="orders"]').html(
+				this.empty_state(__("Filtrga mos zakaz topilmadi."), "filter")
+			);
+		}
 
 		if (orders.truncated) {
 			$body.append(
 				`<p class="od-hint">${__("Faqat oxirgi 500 ta zakaz ko'rsatilmoqda.")}</p>`
 			);
 		}
+
+		// --- hodisalar (serverga bormaydi, faqat qayta chizadi) ---
+		this.$sections.off(".bdzakaz");
+		this.$sections.on("click.bdzakaz", ".bd-zakaz-filtr [data-holat]", (e) => {
+			const kalit = $(e.currentTarget).data("holat") || null;
+			this.state.zakaz_holat = kalit === this.state.zakaz_holat ? null : kalit;
+			this.render_orders(this._zakazlar);
+		});
+		this.$sections.on("change.bdzakaz", "[data-kech]", (e) => {
+			this.state.zakaz_kech = $(e.currentTarget).is(":checked");
+			this.render_orders(this._zakazlar);
+		});
 	}
 
 	// -- 2b. Zakazlar portfeli (rasmiylashtirilmagan) -----------------------

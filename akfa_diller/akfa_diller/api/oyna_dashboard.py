@@ -136,6 +136,41 @@ COGS_ACCOUNT_TYPES = (
 	"Expenses Included In Asset Valuation",
 )
 
+#: Dashboardda ko'rinadigan hisob-nomlarining o'zbekcha muqobili.
+#: DIQQAT: bu FAQAT dashboard ko'rinishi uchun — hisobotlarda, hujjatlarda va
+#: hisoblar rejasida nom asl holicha qoladi (foydalanuvchi talabi 2026-09-10).
+#: Moslashtirish `account_name` bo'yicha aniq mos kelganda ishlaydi, shuning
+#: uchun qayta nomlangan hisoblar tasodifan tarjima bo'lib qolmaydi.
+DASHBOARD_HISOB_NOMLARI = {
+	"Cost of Goods Sold": "Sotilgan tovar tannarxi",
+	"Stock Adjustment": "Ombor tuzatishi",
+}
+
+#: O'lchov birliklarining dashboarddagi o'zbekcha ko'rinishi. Hisob-nomlari
+#: kabi bu ham FAQAT ko'rinish uchun — UOM hujjatlari va hisobotlarda nom asl
+#: holicha qoladi (foydalanuvchi 2026-09-11).
+DASHBOARD_BIRLIKLAR = {
+	"Unit": "dona",
+	"Nos": "dona",
+	"Piece": "dona",
+	"Pcs": "dona",
+	"Box": "quti",
+	"Set": "to'plam",
+	"Pack": "pachka",
+	"Square Meter": "m²",
+	"Square Feet": "kv.fut",
+	"Meter": "m",
+	"Centimeter": "sm",
+	"Millimeter": "mm",
+	"Kg": "kg",
+	"Gram": "g",
+	"Tonne": "tonna",
+	"Litre": "litr",
+	"Hour": "soat",
+	"Day": "kun",
+}
+
+
 #: Og'ir so'rovlar uchun kesh muddati (soniya). `refresh=1` bilan chetlab o'tiladi.
 CACHE_TTL = 60
 
@@ -2211,6 +2246,18 @@ def get_expenses(filters=None):
 	return _get_expenses(ctx)
 
 
+def _birlik_yorligi(uom):
+	"""O'lchov birligi — dashboard ko'rinishi uchun (kerak bo'lsa o'zbekcha)."""
+	nom = (uom or "").strip()
+	return DASHBOARD_BIRLIKLAR.get(nom, nom)
+
+
+def _hisob_yorligi(account_name):
+	"""Hisob nomi — dashboard ko'rinishi uchun (kerak bo'lsa o'zbekchalashtirilgan)."""
+	nom = (account_name or "").strip()
+	return DASHBOARD_HISOB_NOMLARI.get(nom, nom)
+
+
 def _get_expenses(ctx):
 	if not _can("GL Entry"):
 		return _denied("GL Entry")
@@ -2227,7 +2274,7 @@ def _get_expenses(ctx):
 		}
 
 	names = [a.name for a in accounts]
-	labels = {a.name: a.account_name for a in accounts}
+	labels = {a.name: _hisob_yorligi(a.account_name) for a in accounts}
 	params = {
 		"company": ctx.company,
 		"accounts": tuple(names),

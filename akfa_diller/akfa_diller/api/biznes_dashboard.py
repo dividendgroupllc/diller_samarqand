@@ -21,7 +21,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, now_datetime
+from frappe.utils import add_days, cint, date_diff, flt, getdate, now_datetime
 
 from akfa_diller.akfa_diller.api import oyna_dashboard as od
 from akfa_diller.akfa_diller.api.report_utils import get_allowed_companies
@@ -213,6 +213,47 @@ def _wh_sharti(ctx, params, ustun="sle.warehouse"):
 	return " AND {0} = %(wh)s".format(ustun)
 
 
+def _mi_tannarx(ctx, yil, oylar):
+	"""Zakazga bog'langan Material Issue tannarxi — MIJOZ kesimida.
+
+	Oyna sex oqimida hisob-faktura xizmat-itemlardan iborat (`update_stock = 0`),
+	shuning uchun SI tomonida ombor-yozuvi (SLE) YO'Q va tannarx nolga tushib
+	qolardi (2026: savdo 74 623, tannarx 43, marja 99.9% — jonli tekshiruv
+	2026-09-10). Haqiqiy tannarx SO submit bo'lganda yoziladigan Material
+	Issue'da: `Sales Order.custom_material_issue` (oyna_order.py).
+
+	SI-tomondagi SLE bilan ustma-ust TUSHMAYDI — bular alohida ombor
+	hujjatlari, har biri o'z COGS yozuvini beradi. Yig'indi GL bilan aynan mos
+	(2026: sed.amount = SLE = GL COGS = 33 765.57).
+
+	`custom_material_issue` faqat Oyna sex oqimida to'ladi, shuning uchun
+	boshqa kompaniyalarda bu qo'shimcha bo'sh qaytadi.
+
+	Qaytadi: {mijoz: tannarx} — kompaniya valyutasida.
+	"""
+	params = {"company": ctx.company, "yil": yil}
+	oy = ""
+	if oylar:
+		params["oylar"] = tuple(oylar)
+		oy = " AND MONTH(se.posting_date) IN %(oylar)s"
+	wh = _wh_sharti(ctx, params, "sed.s_warehouse")
+
+	rows = frappe.db.sql(
+		"""
+		SELECT so.customer, SUM(sed.amount) AS t
+		FROM `tabStock Entry` se
+		JOIN `tabStock Entry Detail` sed ON sed.parent = se.name
+		JOIN `tabSales Order` so ON so.custom_material_issue = se.name
+		WHERE se.company = %(company)s AND se.docstatus = 1
+		  AND YEAR(se.posting_date) = %(yil)s{oy}{wh}
+		GROUP BY so.customer
+		""".format(oy=oy, wh=wh),
+		params,
+		as_dict=True,
+	)
+	return {r.customer: flt(r.t) for r in rows if r.customer}
+
+
 def _filial_savdo(ctx, from_date, to_date):
 	"""Filial savdosi QATOR (item) darajasida — SI sarlavhasida filial yo'q.
 	Netto (base_net_amount): Filiallar jadvali bilan bir xil ta'rif."""
@@ -236,6 +277,55 @@ def _filial_savdo(ctx, from_date, to_date):
 def _gl_period_net(ctx, accounts, from_date, to_date):
 	"""Davr ichidagi GL netto aylanma (hisob valyutasida)."""
 	return od._gl_balance(ctx, accounts, to_date, from_date=from_date)
+
+
+def _mijoz_qoldiq(ctx, to_date):
+	"""Receivable qoldig'ini MIJOZ kesimida qarz va pred-oplataga ajratadi.
+
+	Hisob darajasidagi netto (`_gl_balance`) qarz bilan oldindan to'lovni
+	bir-biriga yutdirib yuboradi (Oyna sex, 2026-09-10: netto 322 mln = 596 mln
+	qarz − 273 mln avans) — shuning uchun ajratish har bir mijozning O'Z
+	qoldig'i belgisi bo'yicha qilinadi.
+
+	Qaytadi: qarz/avans — {valyuta: summa} (ikkalasi ham musbat),
+	qarzdor/avansli — mijozlar soni.
+	"""
+	accounts = od.get_receivable_accounts(ctx.company)
+	natija = frappe._dict(qarz={}, avans={}, qarzdor=0, avansli=0)
+	if not accounts:
+		return natija
+
+	params = {"company": ctx.company, "accounts": tuple(accounts), "to_date": to_date}
+	conditions = od._gl_extra_conditions(ctx, params)
+	rows = frappe.db.sql(
+		"""
+		SELECT gle.account_currency AS currency, gle.party,
+		       SUM(gle.debit_in_account_currency - gle.credit_in_account_currency) AS amount
+		FROM `tabGL Entry` gle
+		WHERE gle.company = %(company)s
+		  AND gle.is_cancelled = 0
+		  AND gle.account IN %(accounts)s
+		  AND gle.posting_date <= %(to_date)s
+		  {conditions}
+		GROUP BY gle.account_currency, gle.party
+		HAVING ABS(SUM(gle.debit_in_account_currency - gle.credit_in_account_currency)) > 0.005
+		""".format(conditions=conditions),
+		params,
+		as_dict=True,
+	)
+
+	# Bir mijoz ikki valyutada qatnashsa, u ikkala tomonda ham sanalmasin
+	qarzdor, avansli = set(), set()
+	for row in rows:
+		if flt(row.amount) > 0:
+			od._money_add(natija.qarz, row.currency, row.amount)
+			qarzdor.add(row.party)
+		else:
+			od._money_add(natija.avans, row.currency, -flt(row.amount))
+			avansli.add(row.party)
+	natija.qarzdor = len(qarzdor)
+	natija.avansli = len(avansli)
+	return natija
 
 
 def _minus_positions(ctx, to_date):
@@ -364,25 +454,36 @@ def _trade_overview(ctx):
 		"details": [{"label": _("kassa"), "value": len(cash_accounts), "format": "int"}],
 	})
 
-	# 6. Mijozlar balansi (Receivable): manfiy = mijoz avanslari (normal holat)
-	recv_accounts = od.get_receivable_accounts(ctx.company)  # nomlar ro'yxati
-	recv_bag = od._gl_balance(ctx, recv_accounts, ctx.to_date)
-	avans = all(v <= 0 for v in recv_bag.values()) and any(recv_bag.values())
+	# 6-7. Mijozlar qarzi va Avans (oldindan to'lov) — ATAYLAB ikki karta.
+	# Ilgari bitta "Mijozlar balansi" kartasi netto ko'rsatardi va oldindan
+	# to'lovlar qarzni yashirib yuborardi (foydalanuvchi 2026-09-10).
+	mijoz = _mijoz_qoldiq(ctx, ctx.to_date)
 	cards.append({
 		"key": "receivable",
 		"icon": "customer",
-		"label": _("Mijoz avanslari") if avans else _("Mijozlar balansi"),
-		"value": od._money_out(od._money_neg(recv_bag) if avans else recv_bag),
+		"label": _("Mijozlar qarzi"),
+		"value": od._money_out(mijoz.qarz),
 		"format": "currency",
-		"tone": "info" if avans else "warning",
+		"tone": "warning",
 		"as_of": True,
-		"details": (
-			[{"label": _("oldindan to'langan"), "value": None, "format": "note"}]
-			if avans else []
-		),
+		"details": [{"label": _("mijoz"), "value": mijoz.qarzdor, "format": "int"}],
+		"route": ["query-report", "Accounts Receivable"],
+		"route_options": {"company": ctx.company, "report_date": str(ctx.to_date)},
+	})
+	cards.append({
+		"key": "advance",
+		"icon": "arrow-down-left",
+		"label": _("Avans"),
+		"value": od._money_out(mijoz.avans),
+		"format": "currency",
+		"tone": "info",
+		"as_of": True,
+		"details": [{"label": _("mijoz"), "value": mijoz.avansli, "format": "int"}],
+		"route": ["query-report", "Accounts Receivable"],
+		"route_options": {"company": ctx.company, "report_date": str(ctx.to_date)},
 	})
 
-	# 7. Minus-ombor (nazorat kartasi)
+	# 8. Minus-ombor (nazorat kartasi)
 	minus = _minus_positions(ctx, ctx.to_date)
 	cards.append({
 		"key": "minus",
@@ -410,6 +511,389 @@ def _trade_overview(ctx):
 # KUNLIK PANEL: oy-kalendar heatmap (dashboards-ilovasidagi "daily_dashboard"
 # andozasi; farqlar: kompaniya-ruxsat, pul (kg emas), o'zbekcha, bizning ranglar)
 # --------------------------------------------------------------------------
+
+
+#: Mijozlar ro'yxatida bitta sahifadagi qatorlar soni.
+MIJOZ_SAHIFA_OLCHAMI = 50
+
+#: Qarz trendini taqqoslash oynasi (kun): "oshdi/tushdi" shu davrga nisbatan.
+MIJOZ_TREND_KUN = 30
+
+#: Qarz/avansni nolga tenglashtirish chegarasi (yaxlitlash qoldiqlari uchun).
+MIJOZ_NOL = 0.005
+
+#: Ro'yxatni saralash mumkin bo'lgan ustunlar (kalit -> qator maydoni).
+MIJOZ_TARTIBLAR = ("qarz", "ozgarish", "kun", "aylanma", "ulush", "nom")
+
+
+def _yil_oylar(ctx, filters):
+	"""Tahlil davri: (yil, [oylar]). Yil berilmasa — oxirgi savdo yili.
+
+	`get_tahlil` va `get_mijozlar` bitta davrni ko'rsatishi uchun mantiq shu
+	yerda yagona joyda turadi.
+	"""
+	yil = cint(filters.get("yil"))
+	if not yil:
+		oxirgi = frappe.db.sql(
+			"""SELECT MAX(posting_date) FROM `tabSales Invoice`
+			   WHERE company = %s AND docstatus = 1""", (ctx.company,))[0][0]
+		yil = (getdate(oxirgi) if oxirgi else getdate()).year
+
+	oylar = filters.get("oylar") or []
+	if isinstance(oylar, str):
+		try:
+			oylar = json.loads(oylar)
+		except (ValueError, TypeError):
+			oylar = []
+	return yil, sorted({cint(o) for o in oylar if 1 <= cint(o) <= 12})
+
+
+def _mijoz_nomlari(partiyalar):
+	"""{customer: customer_name} — bo'sh nomlar kodning o'zi bilan to'ldiriladi."""
+	if not partiyalar:
+		return {}
+	nomlar = {}
+	for r in frappe.get_all(
+		"Customer",
+		filters={"name": ("in", list(partiyalar))},
+		fields=["name", "customer_name"],
+		ignore_permissions=True,
+		limit_page_length=0,
+	):
+		nomlar[r.name] = r.customer_name or r.name
+	return nomlar
+
+
+def _mijoz_aylanma(ctx, yil, oylar):
+	"""Mijoz kesimidagi aylanma — TANLANGAN DAVRDAGI savdo hujjatlari bo'yicha.
+
+	Davr paneldagi yil/oy chiplaridan olinadi (foydalanuvchi 2026-09-10:
+	"mijozning aylanmasi tanlangan davr orasidagi tranzaksiyalaridan
+	hisoblanishi kerak"). Vozvratlar (is_return) manfiy grand_total bilan
+	o'z-o'zidan ayiriladi — demak bu SOF aylanma.
+
+	Qaytadi: {mijoz: {valyuta: summa}} — hujjat valyutasida.
+	"""
+	params = {"company": ctx.company, "yil": yil}
+	oy = ""
+	if oylar:
+		params["oylar"] = tuple(oylar)
+		oy = " AND MONTH(si.posting_date) IN %(oylar)s"
+
+	if ctx.cost_center:
+		cc = _cc_sharti(ctx, params, "sii.cost_center")
+		sql = """
+			SELECT si.customer, si.currency, SUM(sii.net_amount) AS summa
+			FROM `tabSales Invoice` si
+			JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND YEAR(si.posting_date) = %(yil)s{oy}{cc}
+			GROUP BY si.customer, si.currency
+		""".format(oy=oy, cc=cc)
+	else:
+		sql = """
+			SELECT si.customer, si.currency, SUM(si.grand_total) AS summa
+			FROM `tabSales Invoice` si
+			WHERE si.company = %(company)s AND si.docstatus = 1
+			  AND YEAR(si.posting_date) = %(yil)s{oy}
+			GROUP BY si.customer, si.currency
+		""".format(oy=oy)
+	natija = {}
+	for r in frappe.db.sql(sql, params, as_dict=True):
+		if r.customer:
+			od._money_add(natija.setdefault(r.customer, {}), r.currency, r.summa)
+	return natija
+
+
+@frappe.whitelist()
+def get_mijozlar(filters=None):
+	"""MIJOZLAR TAHLILI: qarz ro'yxati — qidiruv, saralash va sahifalash bilan.
+
+	Har qator: qarz (yoki avans), 30 kunlik o'zgarish (MIJOZ_TREND_KUN), oxirgi
+	to'lovdan beri o'tgan kun va qarzning TANLANGAN DAVRDAGI aylanmaga nisbati.
+	Aylanma davri — paneldagi yil/oy chiplari (`yil`, `oylar`).
+
+	Qarz esa DOIM bugungi (to_date) qoldiq: u davr emas, holat ko'rsatkichi.
+
+	Barcha summalar bitta valyutaga (UZS) keltiriladi — aks holda ustunlarni
+	saralab ham, foizni hisoblab ham bo'lmaydi. Kurs davr oxiriga qarab
+	olinadi (ERPNext hisobotlaridagi bilan bir xil).
+
+	filters: company, yil, oylar, qidiruv, sahifa, tartib, yonalish, olcham.
+	"""
+	filters = od._parse_filters(filters)
+	ctx = _ctx(dict(filters))
+	if not od._can("GL Entry"):
+		return od._denied("GL Entry")
+
+	yil, oylar = _yil_oylar(ctx, filters)
+
+	qidiruv = str(filters.get("qidiruv") or "").strip()
+	sahifa = max(cint(filters.get("sahifa")) or 1, 1)
+	olcham = min(max(cint(filters.get("olcham")) or MIJOZ_SAHIFA_OLCHAMI, 10), 200)
+	tartib = filters.get("tartib") if filters.get("tartib") in MIJOZ_TARTIBLAR else "qarz"
+	teskari = str(filters.get("yonalish") or "desc") != "asc"
+
+	accounts = od.get_receivable_accounts(ctx.company)
+	# Dashboardning qolgan bloklari kabi ro'yxat ham UZS taqdimotida
+	# (foydalanuvchi 2026-09-10: valyutani o'z holiga qaytarish).
+	valyuta = od.PNL_PRESENTATION_CURRENCY
+	bosh = {
+		"permitted": True,
+		"valyuta": valyuta,
+		"trend_kun": MIJOZ_TREND_KUN,
+		"yil": yil,
+		"oylar": oylar,
+		"context": od._context_info(ctx),
+	}
+	if not accounts:
+		return dict(
+			bosh, rows=[], jami={}, sahifa=1, sahifalar=1, jami_qatorlar=0, olcham=olcham,
+			qidiruv=qidiruv, tartib=tartib, yonalish="desc" if teskari else "asc",
+		)
+
+	oldin = str(add_days(getdate(ctx.to_date), -MIJOZ_TREND_KUN))
+
+	params = {
+		"company": ctx.company,
+		"accounts": tuple(accounts),
+		"to_date": ctx.to_date,
+		"oldin": oldin,
+	}
+	conditions = od._gl_extra_conditions(ctx, params)
+
+	# Bitta so'rovda: joriy qoldiq, {trend} kun oldingi qoldiq, oxirgi to'lov,
+	# oxirgi harakat. To'lov = qarzni kamaytirgan kredit; hisob-faktura va
+	# vozvrat (Sales Invoice) to'lov emas, shuning uchun chiqarib tashlanadi.
+	rows = frappe.db.sql(
+		"""
+		SELECT gle.party, gle.account_currency AS currency,
+		       SUM(gle.debit_in_account_currency - gle.credit_in_account_currency) AS qarz,
+		       SUM(CASE WHEN gle.posting_date <= %(oldin)s
+		                THEN gle.debit_in_account_currency - gle.credit_in_account_currency
+		                ELSE 0 END) AS qarz_oldin,
+		       MAX(CASE WHEN gle.credit_in_account_currency > 0
+		                 AND gle.voucher_type <> 'Sales Invoice'
+		                THEN gle.posting_date END) AS oxirgi_tolov,
+		       MAX(gle.posting_date) AS oxirgi_harakat,
+		       MIN(gle.posting_date) AS birinchi_harakat
+		FROM `tabGL Entry` gle
+		WHERE gle.company = %(company)s
+		  AND gle.is_cancelled = 0
+		  AND gle.account IN %(accounts)s
+		  AND gle.posting_date <= %(to_date)s
+		  {conditions}
+		GROUP BY gle.party, gle.account_currency
+		""".format(conditions=conditions),
+		params,
+		as_dict=True,
+	)
+
+	aylanmalar = _mijoz_aylanma(ctx, yil, oylar)
+
+	# Valyuta bo'yicha yig'ish — bir mijoz bir nechta valyutada bo'lishi mumkin
+	yigma = {}
+	for r in rows:
+		if not r.party:
+			continue
+		d = yigma.setdefault(
+			r.party,
+			{
+				"qarz": {},
+				"qarz_oldin": {},
+				"oxirgi_tolov": None,
+				"oxirgi_harakat": None,
+				"birinchi_harakat": None,
+			},
+		)
+		od._money_add(d["qarz"], r.currency, r.qarz)
+		od._money_add(d["qarz_oldin"], r.currency, r.qarz_oldin)
+		for kalit in ("oxirgi_tolov", "oxirgi_harakat"):
+			sana = r.get(kalit)
+			if sana and (not d[kalit] or str(sana) > d[kalit]):
+				d[kalit] = str(sana)
+		if r.birinchi_harakat and (
+			not d["birinchi_harakat"] or str(r.birinchi_harakat) < d["birinchi_harakat"]
+		):
+			d["birinchi_harakat"] = str(r.birinchi_harakat)
+
+	nomlar = _mijoz_nomlari(set(yigma) | set(aylanmalar))
+	bugun = getdate(ctx.to_date)
+
+	natija = []
+	jami_qarz = jami_avans = jami_aylanma = 0.0
+	qarzdor = avansli = 0
+	for mijoz, d in yigma.items():
+		qarz = flt(od._money_to_presentation(d["qarz"], ctx.to_date).get(valyuta))
+		oldingi = flt(od._money_to_presentation(d["qarz_oldin"], ctx.to_date).get(valyuta))
+		aylanma = flt(
+			od._money_to_presentation(aylanmalar.get(mijoz) or {}, ctx.to_date).get(valyuta)
+		)
+		if abs(qarz) < MIJOZ_NOL and abs(aylanma) < MIJOZ_NOL:
+			continue  # butunlay jim hisob — ro'yxatni to'ldirib yotmasin
+
+		ozgarish = qarz - oldingi
+		if qarz > MIJOZ_NOL:
+			jami_qarz += qarz
+			qarzdor += 1
+		elif qarz < -MIJOZ_NOL:
+			jami_avans += -qarz
+			avansli += 1
+		jami_aylanma += aylanma
+
+		natija.append({
+			"customer": mijoz,
+			"nom": nomlar.get(mijoz, mijoz),
+			"qarz": qarz,
+			"avans": -qarz if qarz < -MIJOZ_NOL else 0.0,
+			"ozgarish": ozgarish,
+			"ozgarish_pct": (
+				round(ozgarish / abs(oldingi) * 100, 1) if abs(oldingi) > MIJOZ_NOL else None
+			),
+			"yonalish": (
+				"up" if ozgarish > MIJOZ_NOL else ("down" if ozgarish < -MIJOZ_NOL else "flat")
+			),
+			"oxirgi_tolov": d["oxirgi_tolov"],
+			# "Osilib qolgan kun" faqat QARZI BOR mijozda ma'noga ega. Hech
+			# qachon to'lamagan mijozda (masalan qarzi ochilish JE'sidan kelgan)
+			# hisob birinchi harakat sanasidan yuritiladi — aks holda eng
+			# muzlab qolganlar ustunda bo'sh chiziq bo'lib ko'rinmay ketardi.
+			"tolov_yoq": bool(qarz > MIJOZ_NOL and not d["oxirgi_tolov"]),
+			"kun": (
+				date_diff(bugun, getdate(d["oxirgi_tolov"] or d["birinchi_harakat"]))
+				if qarz > MIJOZ_NOL and (d["oxirgi_tolov"] or d["birinchi_harakat"])
+				else None
+			),
+			"oxirgi_harakat": d["oxirgi_harakat"],
+			"aylanma": aylanma,
+			# Qarz aylanmaning necha foizi (foydalanuvchi tanlovi 2026-09-10)
+			"ulush": (
+				round(qarz / aylanma * 100, 1)
+				if aylanma > MIJOZ_NOL and qarz > MIJOZ_NOL
+				else None
+			),
+		})
+
+	if qidiruv:
+		q = qidiruv.lower()
+		natija = [
+			r for r in natija
+			if q in str(r["nom"]).lower() or q in str(r["customer"]).lower()
+		]
+
+	def kalit(r):
+		if tartib == "nom":
+			return str(r["nom"]).lower()
+		qiymat = r.get(tartib)
+		# Bo'sh qiymatlar (masalan to'lovi yo'q mijoz) doim oxirida tursin
+		return -1e18 if qiymat is None else flt(qiymat)
+
+	natija.sort(key=kalit, reverse=teskari)
+
+	jami_qatorlar = len(natija)
+	sahifalar = max((jami_qatorlar + olcham - 1) // olcham, 1)
+	sahifa = min(sahifa, sahifalar)
+	boshi = (sahifa - 1) * olcham
+
+	return dict(
+		bosh,
+		rows=natija[boshi:boshi + olcham],
+		jami={
+			"qarz": jami_qarz,
+			"avans": jami_avans,
+			"aylanma": jami_aylanma,
+			"qarzdor": qarzdor,
+			"avansli": avansli,
+			"mijozlar": jami_qatorlar,
+			"ulush": (
+				round(jami_qarz / jami_aylanma * 100, 1) if jami_aylanma > MIJOZ_NOL else None
+			),
+		},
+		sahifa=sahifa,
+		sahifalar=sahifalar,
+		jami_qatorlar=jami_qatorlar,
+		olcham=olcham,
+		qidiruv=qidiruv,
+		tartib=tartib,
+		yonalish="desc" if teskari else "asc",
+	)
+
+
+@frappe.whitelist()
+def get_ombor(filters=None):
+	"""OMBOR TAHLILI: ombor qoldig'i ITEM GURUHI kesimida — bitta jadval.
+
+	Item-lar juda ko'p bo'lgani uchun item darajasi ATAYLAB ko'rsatilmaydi
+	(foydalanuvchi 2026-09-11: "item ni o'zi ko'rinmasin, item group bo'yicha
+	ostatka ko'rinsa yetarli").
+
+	Qoldiq — bugungi (to_date) holatga, ERPNext «Stock Balance» mantiqidagi
+	snapshot bilan: har item-ombor juftligi uchun oxirgi ombor-yozuvi.
+	Toolbardagi filial tanlovi ombor-filtri sifatida qo'llanadi.
+
+	Qiymat kompaniya valyutasida (Stock hisobi shu valyutada yuritiladi).
+	"""
+	ctx = _ctx(filters)
+	if not od._can("Stock Ledger Entry", "Item"):
+		return od._denied("Stock Ledger Entry", "Item")
+
+	params = {"company": ctx.company, "to_date": ctx.to_date, "nomalum": _("Guruhsiz")}
+	snapshot = od._stock_snapshot_sql(ctx, params)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT COALESCE(NULLIF(item.item_group, ''), %(nomalum)s) AS guruh,
+		       COUNT(DISTINCT t.item_code) AS pozitsiya,
+		       COUNT(DISTINCT t.warehouse) AS omborlar,
+		       SUM(t.qty) AS qty,
+		       SUM(t.value) AS qiymat,
+		       COUNT(DISTINCT item.stock_uom) AS birliklar,
+		       MIN(item.stock_uom) AS birlik,
+		       SUM(CASE WHEN t.qty < -0.001 THEN 1 ELSE 0 END) AS minus
+		FROM ({snapshot}) t
+		LEFT JOIN `tabItem` item ON item.name = t.item_code
+		WHERE t.qty <> 0
+		GROUP BY guruh
+		ORDER BY qiymat DESC
+		""".format(snapshot=snapshot),
+		params,
+		as_dict=True,
+	)
+
+	jami_qiymat = sum(flt(r.qiymat) for r in rows)
+	natija = []
+	for r in rows:
+		natija.append({
+			"guruh": r.guruh,
+			"pozitsiya": cint(r.pozitsiya),
+			"omborlar": cint(r.omborlar),
+			"qty": flt(r.qty),
+			# Guruhda bir nechta o'lchov birligi bo'lsa miqdorni qo'shish
+			# ma'nosiz — birlik ko'rsatilmaydi va buni UI ham bildiradi.
+			"birlik": od._birlik_yorligi(r.birlik) if cint(r.birliklar) == 1 else None,
+			"qiymat": flt(r.qiymat),
+			"ulush": (
+				round(flt(r.qiymat) / jami_qiymat * 100, 1) if jami_qiymat else None
+			),
+			"minus": cint(r.minus),
+		})
+
+	return {
+		"permitted": True,
+		"valyuta": ctx.company_currency,
+		"sana": str(ctx.to_date),
+		"rows": natija,
+		"jami": {
+			"guruhlar": len(natija),
+			"pozitsiya": sum(r["pozitsiya"] for r in natija),
+			"qiymat": jami_qiymat,
+			"minus": sum(r["minus"] for r in natija),
+			# Guruhlar bo'yicha omborlar sonini qo'shib bo'lmaydi (bir ombor
+			# bir necha guruhda uchraydi) — shuning uchun tanlangan ombor nomi.
+			"ombor": ctx.warehouse or None,
+		},
+		"context": od._context_info(ctx),
+	}
 
 
 @frappe.whitelist()
@@ -646,6 +1130,283 @@ def get_daily(filters=None):
 # --------------------------------------------------------------------------
 
 
+#: ABC chegaralari — kumulyativ aylanma ulushi (%): A — 80%, B — 95%, qolgani C.
+ABC_CHEGARA = (80.0, 95.0)
+#: XYZ chegaralari — oylik variatsiya koeffitsienti CV = σ/μ (%): X ≤ 10, Y ≤ 25.
+XYZ_CHEGARA = (10.0, 25.0)
+#: XYZ bazasiga oy kirishi uchun uning kompaniya-savdosi eng kuchli oyning
+#: kamida shuncha foizi bo'lsin. Migratsiya/ochilish oylari (masalan 29 ta
+#: hisob-faktura) bazaga kirsa, har bir mijozning CV'si sun'iy ko'tarilib
+#: hammasi "Z" bo'lib qolardi (jonli tekshiruv 2026-09-11).
+XYZ_FAOL_ULUSH = 5.0
+
+
+def _mijoz_reyting(ctx, yil, oylar):
+	"""Davrda ishlangan mijozlar soni + ABC/XYZ reytingi.
+
+	Qaytadi: (frontend uchun payload, TO'LIQ mijoz-qatorlari). Qatorlar
+	`_cross_sell` blokiga ham beriladi — ikkala blok bir xil ABC sinflaridan
+	foydalansin va mijoz-ro'yxati ikki marta hisoblanmasin.
+
+	ABC — davr aylanmasidagi kumulyativ ulush (A: birinchi 80%, B: 95% gacha,
+	qolgani C): kim qancha pul keltiradi. XYZ — oylik BARQARORLIK,
+	variatsiya koeffitsienti CV = σ/μ (X ≤ 10%, Y ≤ 25%, Z — undan katta):
+	har oy muntazammi yoki tasodifiymi.
+
+	Bitta oy tanlansa CV ma'nosiz bo'lgani uchun XYZ bazasi sifatida yilning
+	barcha faol oylari olinadi (baza kamida 3 oy bo'lsin). Baza nechta oydan
+	iborat ekani `xyz_oylar`/`xyz_davr` bilan frontendga ham beriladi.
+	Bazaga savdosi juda kichik (XYZ_FAOL_ULUSH dan past) oylar kirmaydi.
+	"""
+	params = {"company": ctx.company, "yil": yil}
+	if oylar:
+		params["oylar"] = tuple(oylar)
+	cc = _cc_sharti(ctx, params, "sii.cost_center")
+
+	# Filial-filtr item darajasida bo'lgani uchun o'sha holda savdo ham
+	# item-summalardan yig'iladi (KPI va mijozlar-jadvalidagi kabi).
+	manba = "`tabSales Invoice` si"
+	if ctx.cost_center:
+		manba += " JOIN `tabSales Invoice Item` sii ON sii.parent = si.name"
+	kalit_ust, nom_ust = "si.customer", "MAX(si.customer_name)"
+	summa_ust = "SUM({0})".format(
+		"sii.base_net_amount" if ctx.cost_center else "si.base_grand_total")
+	qamrov = """FROM {manba}
+		   WHERE si.company = %(company)s AND si.docstatus = 1""".format(manba=manba)
+
+	oylik = frappe.db.sql(
+		"""SELECT {kalit} AS kalit, {nom} AS nom, MONTH(si.posting_date) AS oy,
+		          {summa} AS summa
+		   {qamrov} AND YEAR(si.posting_date) = %(yil)s{cc}
+		   GROUP BY {kalit}, MONTH(si.posting_date)""".format(
+			kalit=kalit_ust, nom=nom_ust, summa=summa_ust,
+			qamrov=qamrov, cc=cc), params, as_dict=True)
+
+	davr_oylar = oylar or list(range(1, 13))
+	birliklar = {}
+	for r in oylik:
+		b = birliklar.setdefault(r.kalit, {"nom": r.nom or r.kalit, "oylik": {}})
+		b["oylik"][cint(r.oy)] = b["oylik"].get(cint(r.oy), 0.0) + flt(r.summa)
+
+	# XYZ bazasi faqat haqiqiy savdo bo'lgan oylardan iborat (XYZ_FAOL_ULUSH).
+	oy_jami = {}
+	for b in birliklar.values():
+		for o, s in b["oylik"].items():
+			oy_jami[o] = oy_jami.get(o, 0.0) + s
+	eng_kuchli = max(list(oy_jami.values()) + [0.0])
+	faol_oylar = sorted(
+		o for o, s in oy_jami.items()
+		if eng_kuchli <= 0 or s / eng_kuchli * 100 >= XYZ_FAOL_ULUSH)
+	baza_oylar = [o for o in davr_oylar if o in faol_oylar]
+	xyz_davr = len(baza_oylar) >= 3
+	if not xyz_davr:
+		baza_oylar = faol_oylar
+
+	qatorlar = []
+	for kalit, b in birliklar.items():
+		if not any(o in b["oylik"] for o in davr_oylar):
+			continue  # davrda ishlanmagan mijoz reytingga kirmaydi
+		qiymatlar = [flt(b["oylik"].get(o, 0.0)) for o in baza_oylar]
+		orta = sum(qiymatlar) / len(qiymatlar) if qiymatlar else 0.0
+		cv = None
+		if orta > 0 and len(qiymatlar) > 1:
+			dispersiya = sum((v - orta) ** 2 for v in qiymatlar) / len(qiymatlar)
+			cv = dispersiya ** 0.5 / orta * 100
+		qatorlar.append({
+			"kalit": kalit,
+			"name": b["nom"],
+			"summa": sum(flt(b["oylik"].get(o, 0.0)) for o in davr_oylar),
+			# CV yonida turadi — shuning uchun XYZ BAZASIDAGI faol oylar soni.
+			"oylar": len([o for o in baza_oylar if b["oylik"].get(o)]),
+			"cv": None if cv is None else round(cv, 1),
+			"xyz": "Z" if cv is None else (
+				"X" if cv <= XYZ_CHEGARA[0]
+				else "Y" if cv <= XYZ_CHEGARA[1] else "Z"),
+		})
+
+	qatorlar.sort(key=lambda q: q["summa"], reverse=True)
+	jami_savdo = sum(q["summa"] for q in qatorlar if q["summa"] > 0)
+	kumulyativ = 0.0
+	for q in qatorlar:
+		if q["summa"] <= 0 or not jami_savdo:
+			q.update({"ulush": 0.0, "kumulyativ": None, "abc": "C"})
+			continue
+		# Sinf chegaraga YETIB KELGUNCHAGI kumulyativ bo'yicha aniqlanadi —
+		# shunda yakka yirik mijoz ham "C" emas, "A" bo'lib qoladi.
+		q["abc"] = ("A" if kumulyativ < ABC_CHEGARA[0]
+		            else "B" if kumulyativ < ABC_CHEGARA[1] else "C")
+		kumulyativ += q["summa"] / jami_savdo * 100
+		q["ulush"] = round(q["summa"] / jami_savdo * 100, 1)
+		q["kumulyativ"] = round(kumulyativ, 1)
+
+	def yigindi(kalit_f, sinflar):
+		xarita = {s: {"sinf": s, "soni": 0, "savdo": 0.0} for s in sinflar}
+		for q in qatorlar:
+			h = xarita[kalit_f(q)]
+			h["soni"] += 1
+			h["savdo"] += q["summa"]
+		for h in xarita.values():
+			h["ulush"] = round(h["savdo"] / jami_savdo * 100, 1) if jami_savdo else 0.0
+		return [xarita[s] for s in sinflar]
+
+	matritsa = {}
+	for q in qatorlar:
+		katak = matritsa.setdefault(
+			q["abc"] + q["xyz"], {"soni": 0, "savdo": 0.0})
+		katak["soni"] += 1
+		katak["savdo"] += q["summa"]
+
+	# Yangi mijoz — birinchi hisob-fakturasi shu davrga tushgani.
+	birinchi = dict(frappe.db.sql(
+		"""SELECT {kalit}, MIN(si.posting_date)
+		   {qamrov}{cc} GROUP BY {kalit}""".format(
+			kalit=kalit_ust, qamrov=qamrov, cc=cc), params))
+	davr_boshi = getdate("{0}-{1:02d}-01".format(yil, min(davr_oylar)))
+	yangi = sum(
+		1 for q in qatorlar
+		if birinchi.get(q["kalit"]) and getdate(birinchi[q["kalit"]]) >= davr_boshi)
+
+	# O'tgan yilning AYNAN shu oylari bilan solishtirish.
+	otgan_params = dict(params, yil=yil - 1)
+	otgan = cint(frappe.db.sql(
+		"""SELECT COUNT(DISTINCT {kalit})
+		   {qamrov} AND YEAR(si.posting_date) = %(yil)s{oy}{cc}""".format(
+			kalit=kalit_ust, qamrov=qamrov, cc=cc,
+			oy=" AND MONTH(si.posting_date) IN %(oylar)s" if oylar else ""),
+		otgan_params)[0][0])
+
+	return {
+		"jami": len(qatorlar),
+		"yangi": yangi,
+		"doimiy": len(qatorlar) - yangi,
+		"otgan_yil": otgan,
+		"savdo": jami_savdo,
+		"ortacha": jami_savdo / len(qatorlar) if qatorlar else 0.0,
+		"xyz_oylar": len(baza_oylar),
+		"xyz_davr": xyz_davr,
+		"xyz_mavjud": len(baza_oylar) > 1,
+		"abc": yigindi(lambda q: q["abc"], "ABC"),
+		"xyz": yigindi(lambda q: q["xyz"], "XYZ"),
+		"matritsa": matritsa,
+		"top": qatorlar[:12],
+	}, qatorlar
+
+
+#: Cross-sell tahlilida nechta "asosiy" tovar guruhi qaraladi.
+CROSS_GURUH = 10
+#: Bitta mijozga nechta guruh tavsiya qilinadi (zaxira ham shu qadar guruhdan).
+CROSS_TAVSIYA = 3
+#: Ro'yxatda nechta mijoz qaytariladi.
+CROSS_MIJOZ = 25
+
+
+def _mediana(qiymatlar):
+	"""Mediana — bitta yirik xarid o'rtachani buzib yubormasligi uchun."""
+	q = sorted(qiymatlar)
+	n = len(q)
+	if not n:
+		return 0.0
+	return q[n // 2] if n % 2 else (q[n // 2 - 1] + q[n // 2]) / 2.0
+
+
+def _cross_sell(ctx, yil, oylar, mijozlar):
+	"""Cross-sell zaxirasi: mijoz asosiy tovar guruhlaridan qaysilarini
+	OLMAYAPTI va bu taxminan qancha pul.
+
+	"Asosiy guruh" — davrda eng ko'p savdo bergan CROSS_GURUH ta tovar guruhi.
+	Zaxira "hamyondagi ulush" usuli bilan baholanadi: shu guruhni oladigan
+	mijozlarda guruhning aylanmadagi ulushi MEDIANASI olinadi va mijozning
+	davr aylanmasiga ko'paytiriladi — ya'ni "o'xshash mijozlar oborotining
+	~9%ini shu guruhga sarflaydi". Yig'indi faqat eng katta CROSS_TAVSIYA ta
+	yo'q guruh bo'yicha olinadi, shunda raqam real ish rejasiga bog'lanadi
+	(hamma yo'q guruhni qo'shsa, baho haqiqatdan uzoqlashadi).
+
+	Tovar guruhi belgilanmagan itemlar tahlilga kirmaydi — ularni tavsiya
+	qilib ham bo'lmaydi.
+	"""
+	params = {"company": ctx.company, "yil": yil}
+	oy = ""
+	if oylar:
+		params["oylar"] = tuple(oylar)
+		oy = " AND MONTH(si.posting_date) IN %(oylar)s"
+	cc = _cc_sharti(ctx, params, "sii.cost_center")
+
+	qatorlar = frappe.db.sql(
+		"""SELECT si.customer, it.item_group AS guruh,
+		          SUM(sii.base_net_amount) AS summa
+		   FROM `tabSales Invoice` si
+		   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+		   JOIN `tabItem` it ON it.name = sii.item_code
+		   WHERE si.company = %(company)s AND si.docstatus = 1
+		     AND it.item_group IS NOT NULL
+		     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}
+		   GROUP BY si.customer, it.item_group""".format(oy=oy, cc=cc),
+		params, as_dict=True)
+	if not qatorlar:
+		return {"asosiy": [], "rows": []}
+
+	savati = {}      # mijoz -> {guruh: summa}
+	guruh_savdo = {}  # guruh -> davr savdosi
+	for r in qatorlar:
+		savati.setdefault(r.customer, {})[r.guruh] = flt(r.summa)
+		guruh_savdo[r.guruh] = guruh_savdo.get(r.guruh, 0.0) + flt(r.summa)
+
+	asosiy = [g for g, _ in sorted(
+		guruh_savdo.items(), key=lambda x: x[1], reverse=True)[:CROSS_GURUH]]
+	jami_c = {c: sum(g.values()) for c, g in savati.items()}
+
+	# Har bir asosiy guruh uchun "odatdagi hamyon ulushi".
+	ulush, xaridor = {}, {}
+	for g in asosiy:
+		ulushlar = [savati[c][g] / jami_c[c]
+		            for c in savati if g in savati[c] and jami_c[c] > 0]
+		ulush[g] = _mediana(ulushlar)
+		xaridor[g] = len(ulushlar)
+
+	sinf = {m["kalit"]: m for m in mijozlar}
+	rows, zaxira_jami, qamrovlar, tor = [], 0.0, [], 0
+	for c, guruhlari in savati.items():
+		if jami_c[c] <= 0:
+			continue
+		bor = [g for g in asosiy if g in guruhlari]
+		qamrovlar.append(len(bor))
+		if len(bor) <= 2:
+			tor += 1
+		yoq = sorted(
+			({"nom": g, "summa": jami_c[c] * ulush[g]} for g in asosiy if g not in guruhlari),
+			key=lambda x: x["summa"], reverse=True)[:CROSS_TAVSIYA]
+		if not yoq:
+			continue
+		zaxira = sum(x["summa"] for x in yoq)
+		zaxira_jami += zaxira
+		m = sinf.get(c) or {}
+		rows.append({
+			"customer": c,
+			"name": m.get("name") or c,
+			"abc": m.get("abc") or "C",
+			"savdo": jami_c[c],
+			"qamrov": len(bor),
+			"yoq": yoq,
+			"zaxira": zaxira,
+		})
+
+	rows.sort(key=lambda x: x["zaxira"], reverse=True)
+	davr_savdo = sum(guruh_savdo.values())
+	return {
+		"asosiy_ulush": round(
+			sum(guruh_savdo[g] for g in asosiy) / davr_savdo * 100, 1) if davr_savdo else 0.0,
+		"asosiy": [{"nom": g, "savdo": guruh_savdo[g], "xaridor": xaridor[g],
+		            "ulush": round(ulush[g] * 100, 1)} for g in asosiy],
+		"asosiy_soni": len(asosiy),
+		"mijozlar": len(savati),
+		"tor": tor,
+		"ortacha_qamrov": round(sum(qamrovlar) / len(qamrovlar), 1) if qamrovlar else 0,
+		"zaxira_jami": zaxira_jami,
+		"tavsiya_soni": CROSS_TAVSIYA,
+		"rows": rows[:CROSS_MIJOZ],
+	}
+
+
 @frappe.whitelist()
 def get_tahlil(filters=None):
 	"""filters: company, yil, oylar (ro'yxat, bo'sh = butun yil).
@@ -657,20 +1418,7 @@ def get_tahlil(filters=None):
 	filters = od._parse_filters(filters)
 	ctx = _ctx(dict(filters))
 
-	yil = cint(filters.get("yil"))
-	if not yil:
-		oxirgi = frappe.db.sql(
-			"""SELECT MAX(posting_date) FROM `tabSales Invoice`
-			   WHERE company = %s AND docstatus = 1""", (ctx.company,))[0][0]
-		yil = (getdate(oxirgi) if oxirgi else getdate()).year
-
-	oylar = filters.get("oylar") or []
-	if isinstance(oylar, str):
-		try:
-			oylar = json.loads(oylar)
-		except (ValueError, TypeError):
-			oylar = []
-	oylar = sorted({cint(o) for o in oylar if 1 <= cint(o) <= 12})
+	yil, oylar = _yil_oylar(ctx, filters)
 
 	oy_sharti = ""
 	params = {"company": ctx.company, "yil": yil}
@@ -777,6 +1525,11 @@ def get_tahlil(filters=None):
 			params, as_dict=True):
 			tannarx_m[r.customer] = flt(r.t)
 
+		# Oyna sex oqimi: tannarx zakazga bog'langan Material Issue'da
+		mi_tannarx = _mi_tannarx(ctx, yil, oylar)
+		for mijoz_kaliti, qiymat in mi_tannarx.items():
+			tannarx_m[mijoz_kaliti] = tannarx_m.get(mijoz_kaliti, 0.0) + qiymat
+
 		mijozlar = []
 		for r in savdo_m:
 			t = tannarx_m.get(r.customer, 0.0)
@@ -799,7 +1552,7 @@ def get_tahlil(filters=None):
 			     AND si.company = %(company)s AND si.docstatus = 1
 			     AND YEAR(si.posting_date) = %(yil)s{oy}""".format(
 				oy=oy_sharti, wh=wh),
-			params)[0][0])
+			params)[0][0]) + sum(mi_tannarx.values())
 		marja = savdo - tannarx
 
 		yillar = [cint(r[0]) for r in frappe.db.sql(
@@ -984,6 +1737,9 @@ def get_tahlil(filters=None):
 			})
 		jami_balans = yigindi if oxirgi_oy else None
 
+		# Mijoz reytingi va cross-sell bitta mijoz-ro'yxatidan oziqlanadi.
+		mijoz_reyting, mijoz_qatorlar = _mijoz_reyting(ctx, yil, oylar)
+
 		return {
 			"permitted": True,
 			"currency": ctx.company_currency,
@@ -999,17 +1755,22 @@ def get_tahlil(filters=None):
 			"balans": {
 				"naqd": od._money_out(naqd),
 				"bank": od._money_out(bank),
-				# Umumiy paneldagi kabi: balans manfiy bo'lsa bu mijoz avanslari —
-				# musbat qilib, yorlig'i bilan beriladi.
-				"mijoz": od._money_out(
-					{c: -v for c, v in mijoz_bal.items()}
-					if mijoz_bal and all(flt(v) <= 0.005 for v in mijoz_bal.values())
-					else mijoz_bal),
+				# Qatorlar JAMI bilan bir xil konvensiyada — XOM GL belgisi
+				# bilan beriladi, shunda qatorlarni qo'shsa aynan "UMUMIY
+				# BALANS" chiqadi. Ilgari mijoz-avans musbatga aylantirilib,
+				# kreditorga abs() qo'llanardi; natijada karta o'zi bilan
+				# bog'lanmasdi (Kattaqo'rg'on: 1 158 919 farq, Samarqand
+				# Diller: 10 918 517 — audit 2026-09-11).
+				"mijoz": od._money_out(mijoz_bal),
 				"mijoz_label": (
 					"Mijoz avanslari"
 					if mijoz_bal and all(flt(v) <= 0.005 for v in mijoz_bal.values())
 					else "Mijozlar balansi"),
-				"kreditor": od._money_out({c: abs(v) for c, v in kreditor.items()}),
+				"kreditor": od._money_out(kreditor),
+				# Kreditorlik schyoti DEBET qoldiqda bo'lsa (to'lov bor,
+				# hujjat yo'q) — abs() uni yashirardi; endi belgilanadi.
+				"kreditor_ogoh": bool(kreditor) and any(
+					flt(v) > 0.005 for v in kreditor.values()),
 				"ombor": od._money_out(ombor.value),
 				"jami": jami_balans,
 				"trend": balans_trend,
@@ -1028,6 +1789,8 @@ def get_tahlil(filters=None):
 			},
 			"tovarlar": tovarlar,
 			"mijozlar": mijozlar,
+			"mijoz_reyting": mijoz_reyting,
+			"cross_sell": _cross_sell(ctx, yil, oylar, mijoz_qatorlar),
 		}
 
 	kesh_ctx = frappe._dict(dict(
