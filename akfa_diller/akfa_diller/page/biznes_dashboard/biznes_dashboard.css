@@ -1397,6 +1397,10 @@
 	gap: 16px;
 	align-items: start;
 }
+/* DIQQAT: yig'ish qoidalari bu yerda emas — pastdagi "TO'LIQ KENGLIK"
+   bloki layoutni display:block ga o'tkazib, menyuni position:fixed qiladi.
+   Haqiqiy joylashuv o'sha yerda, yig'ish ham shu sababdan o'sha yerda. */
+
 .biznes-dash .bd-sidenav {
 	position: sticky;
 	top: 70px;
@@ -1405,83 +1409,127 @@
 	background: var(--fg-color);
 	border: 1px solid var(--border-color);
 	border-radius: 14px;
-	padding: 14px 12px;
-	box-shadow: var(--bd-shadow);
+	padding: 10px;
 }
+
+.biznes-dash .bd-sidenav__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 2px 4px 10px 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+	margin-bottom: 8px;
+}
+
 .biznes-dash .bd-sidenav__title {
 	font-size: var(--text-sm);
 	font-weight: 700;
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	color: var(--text-muted);
-	padding: 0 6px 10px;
+	white-space: nowrap;
 }
-.biznes-dash .bd-sidenav__toggle {
-	width: 100%;
+
+/* Yopish strelkasi: chapga qaraydi — panel shu tomonga ketadi. */
+.biznes-dash .bd-sidenav__strelka {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	background: color-mix(in srgb, var(--text-color) 3.5%, transparent);
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 28px;
+	height: 28px;
+	padding: 0;
 	border: none;
-	border-radius: 9px;
-	padding: 8px 10px;
-	font-weight: 600;
-	color: var(--text-color);
+	border-radius: 8px;
+	background: transparent;
 	cursor: pointer;
+	transition: background 0.13s ease;
 }
-.biznes-dash .bd-sidenav__arrow {
-	width: 8px;
-	height: 8px;
+.biznes-dash .bd-sidenav__strelka span {
+	display: block;
+	width: 7px;
+	height: 7px;
+	margin-left: 3px;
 	border-right: 2px solid var(--text-muted);
 	border-bottom: 2px solid var(--text-muted);
-	transform: rotate(45deg);
-	transition: transform 0.15s ease;
+	transform: rotate(135deg);
+	transition: border-color 0.13s ease;
 }
-.biznes-dash .bd-sidenav__group.is-open .bd-sidenav__arrow {
-	transform: rotate(225deg);
+.biznes-dash .bd-sidenav__strelka:hover {
+	background: color-mix(in srgb, var(--text-color) 6%, transparent);
 }
+.biznes-dash .bd-sidenav__strelka:hover span {
+	border-right-color: var(--text-color);
+	border-bottom-color: var(--text-color);
+}
+.biznes-dash .bd-sidenav__strelka:focus-visible,
+.biznes-dash .bd-sidenav__item:focus-visible {
+	outline: 2px solid var(--bd-primary);
+	outline-offset: -2px;
+}
+
 .biznes-dash .bd-sidenav__items {
-	display: none;
-	flex-direction: column;
-	gap: 4px;
-	padding-top: 8px;
-}
-.biznes-dash .bd-sidenav__group.is-open .bd-sidenav__items {
 	display: flex;
+	flex-direction: column;
+	gap: 2px;
 }
+
 .biznes-dash .bd-sidenav__item {
+	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 9px;
+	gap: 10px;
 	width: 100%;
 	border: none;
 	background: transparent;
 	border-radius: 9px;
-	padding: 8px 10px;
+	padding: 9px 10px;
 	color: var(--text-color);
 	font-size: var(--text-md);
 	cursor: pointer;
-	transition: background 0.13s, transform 0.13s;
+	transition: background 0.12s ease, color 0.12s ease;
 	text-align: left;
 }
 .biznes-dash .bd-sidenav__item:hover {
-	background: color-mix(in srgb, var(--text-color) 4%, transparent);
-	transform: translateX(2px);
+	background: color-mix(in srgb, var(--text-color) 5%, transparent);
 }
+
+/* Faol band: to'ldirish + chap chekkadagi aksent chiziq. Rang bilan birga
+   SHAKL ham farq qilsin — rangni ajratolmaydigan foydalanuvchi uchun. */
 .biznes-dash .bd-sidenav__item.is-active {
-	background: color-mix(in srgb, var(--bd-primary) 12%, transparent);
+	background: color-mix(in srgb, var(--bd-primary) 11%, transparent);
 	color: var(--bd-primary);
 	font-weight: 600;
 }
-.biznes-dash .bd-sidenav__dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--gray-400);
-	flex: 0 0 auto;
-}
-.biznes-dash .bd-sidenav__item.is-active .bd-sidenav__dot {
+.biznes-dash .bd-sidenav__item.is-active::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 3px;
+	height: 18px;
+	border-radius: 0 3px 3px 0;
 	background: var(--bd-primary);
+}
+
+.biznes-dash .bd-sidenav__ikon {
+	display: inline-flex;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+}
+.biznes-dash .bd-sidenav__ikon > svg {
+	width: 15px;
+	height: 15px;
+}
+.biznes-dash .bd-sidenav__item.is-active .bd-sidenav__ikon {
+	color: var(--bd-primary);
+}
+.biznes-dash .bd-sidenav__matn {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 @media (max-width: 991px) {
@@ -1611,8 +1659,11 @@
 .biznes-dash .bd-layout {
 	display: block;
 }
+/* Kontent DOIM to'liq kenglikda: menyu uni surmaydi, ustidan ochiladi
+   (foydalanuvchi 2026-09-15). Shuning uchun margin-left yo'q, menyu esa
+   yuqori qatlamda — sticky toolbar z-index: 5 dan baland turishi shart. */
 .biznes-dash .bd-main {
-	margin-left: 240px;
+	margin-left: 0;
 	min-width: 0;
 }
 .biznes-dash .bd-sidenav {
@@ -1620,20 +1671,123 @@
 	left: 18px;
 	top: 120px;
 	width: 218px;
-	z-index: 6;
+	z-index: 30;
 }
 .biznes-dash .bd-sidenav__card {
 	max-height: calc(100vh - 140px);
 	overflow-y: auto;
 }
+
+/* --- Menyu QATLAMI (kontent ustida ochiladi) -----------------------------
+   Dashboard doim to'liq kenglikda; menyu uni surmaydi, ustidan chiqadi.
+   Yopiq holatda hech qanday joy egallamaydi — DOM'da qoladi-yu, chapga
+   surilib, o'lchamsiz va fokusga tushmaydigan bo'ladi. */
+.biznes-dash .bd-sidenav {
+	transform: translateX(calc(-100% - 24px));
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1),
+		opacity 0.18s ease, visibility 0.22s;
+}
+.biznes-dash .bd-layout.is-menyu-ochiq .bd-sidenav {
+	transform: none;
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+}
+/* Qatlam ekani soyadan bilinsin — kontent bilan chegarasi aniq bo'lsin. */
+.biznes-dash .bd-layout.is-menyu-ochiq .bd-sidenav__card {
+	box-shadow: 0 8px 28px rgba(25, 39, 52, 0.16), 0 2px 6px rgba(25, 39, 52, 0.08);
+}
+
+/* Parda: tashqariga bosishni tutadi. Ko'rinmas darajada yengil — menyu
+   modal emas, shunchaki qatlam; kontent o'qilaverishi kerak. */
+.biznes-dash .bd-sidenav__parda[hidden] {
+	display: none;
+}
+.biznes-dash .bd-sidenav__parda {
+	position: fixed;
+	inset: 0;
+	z-index: 29;
+	background: rgba(25, 39, 52, 0.06);
+	animation: bd-parda 0.18s ease;
+}
+@keyframes bd-parda {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+/* --- Toolbardagi panel-tugmasi ------------------------------------------
+   Menyu yopiq turganda JORIY PANEL nomi shu yerda ko'rinadi — qatlamli
+   menyuda foydalanuvchi qayerdaligini yo'qotmasligi uchun. */
+.biznes-dash .bd-panel-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 9px;
+	flex: 0 0 auto;
+	height: 36px;
+	padding: 0 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 9px;
+	background: var(--fg-color);
+	color: var(--text-color);
+	font-size: var(--text-lg);
+	font-weight: 600;
+	cursor: pointer;
+	transition: border-color 0.13s ease, background 0.13s ease;
+}
+.biznes-dash .bd-panel-btn:hover {
+	border-color: var(--bd-primary);
+	background: color-mix(in srgb, var(--bd-primary) 7%, var(--fg-color));
+}
+.biznes-dash .bd-panel-btn:focus-visible {
+	outline: 2px solid var(--bd-primary);
+	outline-offset: 1px;
+}
+.biznes-dash .bd-panel-btn__ikon {
+	display: inline-flex;
+	color: var(--bd-primary);
+}
+.biznes-dash .bd-panel-btn__ikon > svg {
+	width: 17px;
+	height: 17px;
+}
+.biznes-dash .bd-panel-btn__matn {
+	white-space: nowrap;
+}
+/* Strelka: yopiq — o'ngga (ochiladi), ochiq — chapga (yopiladi). */
+.biznes-dash .bd-panel-btn__strelka {
+	width: 7px;
+	height: 7px;
+	margin-left: 1px;
+	border-right: 2px solid var(--text-muted);
+	border-bottom: 2px solid var(--text-muted);
+	transform: rotate(315deg);
+	transition: transform 0.18s ease;
+}
+.biznes-dash .bd-panel-btn[aria-expanded="true"] .bd-panel-btn__strelka {
+	transform: rotate(135deg);
+}
+
 @media (max-width: 991px) {
 	.biznes-dash .bd-sidenav {
-		position: static;
-		width: auto;
-		margin-bottom: 12px;
+		width: min(260px, 82vw);
 	}
 	.biznes-dash .bd-main {
 		margin-left: 0;
+	}
+}
+
+/* Harakatni kamaytirish so'ralgan bo'lsa — sirg'alish yo'q, faqat paydo
+   bo'lish/yo'qolish. */
+@media (prefers-reduced-motion: reduce) {
+	.biznes-dash .bd-sidenav,
+	.biznes-dash .bd-panel-btn__strelka {
+		transition-duration: 0.01ms;
+	}
+	.biznes-dash .bd-sidenav__parda {
+		animation: none;
 	}
 }
 
@@ -2029,6 +2183,21 @@
 	filter: brightness(1.06);
 }
 
+/* Bosiladigan katak (mijozlari bor) — sub-oyna ochadi. */
+.biznes-dash .bd-matritsa__katak[data-katak] {
+	cursor: pointer;
+}
+
+.biznes-dash .bd-matritsa__katak[data-katak]:hover {
+	filter: brightness(1.1);
+	border-color: var(--bd-primary);
+}
+
+.biznes-dash .bd-matritsa__katak[data-katak]:focus-visible {
+	outline: 2px solid var(--bd-primary);
+	outline-offset: 1px;
+}
+
 .biznes-dash .bd-matritsa__katak.is-bosh {
 	opacity: 0.45;
 }
@@ -2137,6 +2306,137 @@
 .biznes-dash .bd-sinf--C,
 .biznes-dash .bd-sinf--Z {
 	background: color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+
+/* -- Mijoz statusi: jadval nishonlari + chip-filtr ------------------------ */
+
+.biznes-dash .bd-status {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 999px;
+	font-size: 10.5px;
+	font-weight: 600;
+	line-height: 17px;
+	white-space: nowrap;
+	color: #fff;
+	background: var(--gray-500, #8d99a6);
+}
+
+.biznes-dash .bd-status--gold {
+	background: var(--bd-success);
+}
+
+.biznes-dash .bd-status--hajm {
+	background: var(--bd-warning);
+}
+
+.biznes-dash .bd-status--potensial {
+	background: var(--bd-primary);
+}
+
+/* "Oddiy" — ko'pchilik; to'ldirilgan nishon jadvalni ola-bula qilib
+   yuborardi, shuning uchun faqat kontur. */
+.biznes-dash .bd-status--oddiy {
+	background: transparent;
+	color: var(--text-muted);
+	border: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent);
+	line-height: 15px;
+}
+
+.biznes-dash .bd-status--zarar {
+	background: var(--bd-danger);
+}
+
+/* Uzuq kontur — bu status emas, ma'lumot to'liq emasligining belgisi. */
+.biznes-dash .bd-status--tekshirish {
+	background: transparent;
+	color: var(--bd-warning);
+	border: 1px dashed color-mix(in srgb, var(--bd-warning) 60%, transparent);
+	line-height: 15px;
+}
+
+.biznes-dash .bd-sfiltr {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 14px;
+}
+
+.biznes-dash .bd-sfiltr__label {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+	margin-right: 2px;
+}
+
+/* Chegaralar izohi — chiplardan keyin, yangi qatorga tushsa ham o'ngda. */
+.biznes-dash .bd-sfiltr__izoh {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+	.biznes-dash .bd-sfiltr__izoh {
+		margin-left: 0;
+		flex-basis: 100%;
+	}
+}
+
+.biznes-dash .bd-chip--st {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 9px;
+}
+
+/* Guruh soni — chip ichida, biroz bosiqroq. */
+.biznes-dash .bd-chip--st em {
+	font-style: normal;
+	font-weight: 700;
+	font-size: 11px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+	font-variant-numeric: tabular-nums;
+}
+
+.biznes-dash .bd-chip--st.is-active em {
+	background: rgba(255, 255, 255, 0.25);
+}
+
+/* Faol bo'lmagan holatda chap chekkada status rangi — jadvaldagi nishon
+   bilan bir xil ton, shunda chip va qator ko'z bilan bog'lanadi. */
+.biznes-dash .bd-chip--st-gold {
+	box-shadow: inset 3px 0 0 var(--bd-success);
+}
+
+.biznes-dash .bd-chip--st-hajm {
+	box-shadow: inset 3px 0 0 var(--bd-warning);
+}
+
+.biznes-dash .bd-chip--st-potensial {
+	box-shadow: inset 3px 0 0 var(--bd-primary);
+}
+
+.biznes-dash .bd-chip--st-oddiy {
+	box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+.biznes-dash .bd-chip--st-zarar {
+	box-shadow: inset 3px 0 0 var(--bd-danger);
+}
+
+.biznes-dash .bd-chip--st-tekshirish {
+	box-shadow: inset 3px 0 0 color-mix(in srgb, var(--bd-warning) 60%, transparent);
+}
+
+.biznes-dash .bd-chip--st.is-active {
+	box-shadow: none;
 }
 
 /* Balans (tor) + qo'shni keng blok qatori */
@@ -2404,6 +2704,12 @@
 	margin-top: 10px;
 }
 
+/* Panel-tugmasi qatori — sahifa sarlavhasi ostidagi birinchi qator.
+   Undan keyingi filtr-chiplar biroz nafas oladi. */
+.biznes-dash .bd-panel-qatori {
+	margin-bottom: 2px;
+}
+
 .biznes-dash .bd-companies {
 	margin-bottom: 2px;
 }
@@ -2597,4 +2903,55 @@
  * olsin (masofa `.od-row` ning margin-bottom'idan kelardi, alohida blokda yo'q). */
 .biznes-dash .od-sections > .od-block {
 	margin-bottom: var(--od-gap);
+}
+
+
+/* -- ABC×XYZ katak sub-oynasi (frappe.ui.Dialog ichida) ------------------- */
+
+.bd-katak {
+	font-size: var(--text-md);
+}
+
+.bd-katak--yuk {
+	padding: 28px 0;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.bd-katak__bosh {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.bd-katak__bosh b {
+	font-size: 13px;
+}
+
+/* Guruhning jami savdosi va marjasi — o'ng chekkada */
+.bd-katak__bosh em {
+	display: inline-flex;
+	gap: 10px;
+	margin-left: auto;
+	font-style: normal;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.bd-katak__tavsiya {
+	margin: 0 0 14px;
+	padding: 8px 11px;
+	border-radius: 8px;
+	font-size: 12.5px;
+	line-height: 1.45;
+	color: var(--text-color);
+	background: var(--subtle-fg, var(--control-bg));
+}
+
+/* Uzun ro'yxat oynani cho'zib yubormasin. */
+.bd-katak .od-table-wrap {
+	max-height: 58vh;
+	overflow: auto;
 }

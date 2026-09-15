@@ -57,6 +57,13 @@ const OD_PERIODS = [
 //: shuning uchun mijoz tomonda ham shunday bo'lishi shart.
 const OD_WEEK_START = 1;
 
+//: Kassa hisobining turi -> yorlig'i (backend `kind` bilan bir xil).
+const OD_KASSA_KIND = {
+	cash: __("naqd"),
+	plastik: __("plastik / karta"),
+	bank: __("bank"),
+};
+
 // Sana arifmetikasi — mahalliy vaqt zonasida, UTC siljishisiz.
 const OD_DATE = {
 	pad: (n) => String(n).padStart(2, "0"),
@@ -1407,7 +1414,7 @@ class OynaDashboard {
 					_click: () =>
 						this.open_report("DDS", row.mode_of_payment ? { mode_of_payment: row.mode_of_payment } : {}),
 					name: `<b>${od.esc(row.label)}</b><small>${od.esc(
-						row.kind === "bank" ? __("bank / plastik") : __("naqd")
+						OD_KASSA_KIND[row.kind] || __("naqd")
 					)} · ${od.esc(row.account_currency)}</small>`,
 					// Valyuta sarlavhada bir marta ko'rsatilgan — ustunlarda takrorlanmaydi.
 					// Istisno: hisobning O'Z valyutasidagi qoldiq (pastdagi kichik qator),

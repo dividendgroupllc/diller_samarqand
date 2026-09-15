@@ -89,17 +89,25 @@ const OD_DATE = {
 // Grafik o'qlari uchun oy nomlari. Frappe'ning str_to_user() sana formatiga
 // bog'liq raqamli yorliq beradi ("01-2026"), bu grafikda o'qilmaydi.
 //: Panel ko'rinishlari — chap menyu (yangi panel qo'shilsa shu ro'yxatga).
+//: Har panelning o'z ikonkasi bor: 7 ta bir xil nuqta bilan ro'yxatni
+//: ko'z bilan tez tanlab bo'lmaydi — har safar yorliqni o'qishga to'g'ri
+//: kelardi. Ikonka takroriy foydalanishda nishon vazifasini bajaradi.
 const BD_VIEWS = [
-	{ key: "umumiy", label: __("Umumiy panel") },
-	{ key: "kunlik", label: __("Kunlik panel") },
-	{ key: "tahlil", label: __("Savdo tahlili") },
+	{ key: "umumiy", label: __("Umumiy panel"), icon: "dashboard" },
+	{ key: "kunlik", label: __("Kunlik panel"), icon: "today" },
+	{ key: "tahlil", label: __("Savdo tahlili"), icon: "chart" },
 	// Kalit "marja" bo'lib qoladi (saqlangan tanlov va BD_TAHLIL_OILA shunga
 	// bog'langan), faqat ko'rinadigan nom o'zgardi.
-	{ key: "marja", label: __("Moliya") },
-	{ key: "tovarlar", label: __("Tovarlar tahlili") },
-	{ key: "mijozlar", label: __("Mijozlar tahlili") },
-	{ key: "ombor", label: __("Ombor tahlili") },
+	{ key: "marja", label: __("Moliya"), icon: "money-coins-1" },
+	{ key: "tovarlar", label: __("Tovarlar tahlili"), icon: "retail" },
+	{ key: "mijozlar", label: __("Mijozlar tahlili"), icon: "users" },
+	{ key: "ombor", label: __("Ombor tahlili"), icon: "stock" },
 ];
+
+//: Joriy panel nomi (toolbardagi tugma yorlig'i uchun).
+function bd_view_meta(key) {
+	return BD_VIEWS.find((v) => v.key === key) || BD_VIEWS[0];
+}
 
 //: get_tahlil ma'lumotidan oziqlanadigan panellar (bitta so'rov — Redis kesh
 //: tufayli panellar orasida almashish serverga qayta bormaydi)
@@ -121,6 +129,13 @@ const BD_ULUSH_RANGLAR = [
 
 //: ABC/XYZ sinflarining oddiy til bilan ma'nosi — nishon yonida chiqadi,
 //: shunda "A" yoki "Z" nimani anglatishini eslab o'tirish shart emas.
+//: Kassa hisobining turi -> jadvaldagi yorlig'i (backend `kind` bilan bir xil).
+const BD_KASSA_KIND = {
+	cash: __("naqd"),
+	plastik: __("plastik / karta"),
+	bank: __("bank"),
+};
+
 const BD_SINF_NOM = {
 	A: __("asosiy"),
 	B: __("o'rta"),
@@ -128,6 +143,36 @@ const BD_SINF_NOM = {
 	X: __("muntazam"),
 	Y: __("o'zgaruvchan"),
 	Z: __("tasodifiy"),
+};
+
+//: MIJOZ STATUSI (2x2). Ikkita mustaqil o'q, ikkalasi ham KOMPANIYANING O'Z
+//: o'rtachasiga taqqoslanadi: X = savdo > o'rtacha savdo, Y = marja% >
+//: o'rtacha marja%. Kalitlar backend'dagi STATUS_* konstantalari bilan bir xil.
+const BD_STATUS = {
+	gold: {
+		nom: __("Gold"),
+		izoh: __("Savdosi ham, marjasi ham o'rtachadan yuqori"),
+	},
+	hajm: {
+		nom: __("Hajm"),
+		izoh: __("Ko'p oladi, lekin marjasi o'rtachadan past — chegirma va narxni ko'rish kerak"),
+	},
+	potensial: {
+		nom: __("Potensial"),
+		izoh: __("Marjasi yaxshi, lekin kam oladi — hajmini o'stirish mumkin"),
+	},
+	oddiy: {
+		nom: __("Oddiy"),
+		izoh: __("Savdosi ham, marjasi ham o'rtachadan past"),
+	},
+	zarar: {
+		nom: __("Zarar"),
+		izoh: __("Marjasi manfiy — tovar tannarxidan arzonga ketgan"),
+	},
+	tekshirish: {
+		nom: __("Tekshirish"),
+		izoh: __("Tannarx to'liq yozilmagan (ombor minusda sotilgan) — marja ishonchsiz, status berilmaydi"),
+	},
 };
 
 //: Matritsa katagi uchun tavsiya (title): guruh bilan nima qilish kerak.
@@ -448,6 +493,7 @@ class BiznesDashboard {
 			<div class="oyna-dash biznes-dash">
 				<div class="bd-layout">
 					<aside class="bd-sidenav"></aside>
+					<div class="bd-sidenav__parda" hidden></div>
 					<div class="bd-main">
 						<div class="od-toolbar"></div>
 						<div class="od-context"></div>
@@ -458,6 +504,7 @@ class BiznesDashboard {
 			</div>
 		`);
 
+		this.$layout = this.page.main.find(".bd-layout");
 		this.$sidenav = this.page.main.find(".bd-sidenav");
 		this.$toolbar = this.page.main.find(".od-toolbar");
 		this.$context = this.page.main.find(".od-context");
@@ -471,38 +518,53 @@ class BiznesDashboard {
 	// -- chap menyu (dashboards-ilovasi andozasida, bizning uslubda) --------
 
 	render_sidenav() {
-		const ochiq = bd_saqlash.get("bd:sidenav-ochiq", "1") === "1";
+		// Menyu kontent USTIDAN ochiladigan qatlam (dashboard doim to'liq
+		// kenglikda). Qatlam bo'lgani uchun uni yopishning UCHALA odatiy
+		// yo'li ham bor: strelka, Esc va tashqariga bosish. Panel tanlangach
+		// o'zi yopiladi — aks holda siz ochmoqchi bo'lgan kontentni to'sib
+		// turardi.
 		this.$sidenav.html(`
 			<div class="bd-sidenav__card">
-				<div class="bd-sidenav__title">${__("Panellar")}</div>
-				<div class="bd-sidenav__group ${ochiq ? "is-open" : ""}">
-					<button type="button" class="bd-sidenav__toggle">
-						<span>${__("Panellar ro'yxati")}</span>
-						<span class="bd-sidenav__arrow"></span>
+				<div class="bd-sidenav__head">
+					<span class="bd-sidenav__title">${__("Panellar")}</span>
+					<button type="button" class="bd-sidenav__strelka"
+						aria-label="${__("Panellarni yopish")}"
+						title="${__("Panellarni yopish")} (Esc)">
+						<span></span>
 					</button>
-					<div class="bd-sidenav__items">
-						${BD_VIEWS.map(
-							(v) => `
-							<button type="button" class="bd-sidenav__item ${
-								v.key === this.state.view ? "is-active" : ""
-							}" data-view="${v.key}">
-								<span class="bd-sidenav__dot"></span>
-								<span>${od.esc(v.label)}</span>
-							</button>`
-						).join("")}
-					</div>
+				</div>
+				<div class="bd-sidenav__items">
+					${BD_VIEWS.map(
+						(v) => `
+						<button type="button" class="bd-sidenav__item ${
+							v.key === this.state.view ? "is-active" : ""
+						}" data-view="${v.key}">
+							<span class="bd-sidenav__ikon">${frappe.utils.icon(v.icon, "sm")}</span>
+							<span class="bd-sidenav__matn">${od.esc(v.label)}</span>
+						</button>`
+					).join("")}
 				</div>
 			</div>
 		`);
+		this.sidenav_ochiq(false);
 
-		this.$sidenav.on("click", ".bd-sidenav__toggle", () => {
-			const $g = this.$sidenav.find(".bd-sidenav__group");
-			$g.toggleClass("is-open");
-			bd_saqlash.set("bd:sidenav-ochiq", $g.hasClass("is-open") ? "1" : "0");
+		// Ochish/yopish: toolbardagi tugma va menyudagi strelka — bitta delegat.
+		this.$layout.on("click", ".bd-sidenav__strelka", () => this.sidenav_ochiq(false));
+
+		// Pardaga (kontent ustidagi shaffof qatlam) bosish — yopiladi.
+		this.$layout.on("click", ".bd-sidenav__parda", () => this.sidenav_ochiq(false));
+
+		// Esc — qatlamli interfeysda majburiy. Sahifa yopilganda tozalanadi.
+		$(document).on("keydown.bdsidenav", (event) => {
+			if (event.key === "Escape" && this.sidenav_holati) {
+				this.sidenav_ochiq(false);
+				this.$toolbar.find(".bd-panel-btn").trigger("focus");
+			}
 		});
 
 		this.$sidenav.on("click", ".bd-sidenav__item", (event) => {
 			const view = $(event.currentTarget).data("view");
+			this.sidenav_ochiq(false);
 			if (view === this.state.view) return;
 			this.state.view = view;
 			bd_saqlash.set("bd:view", view);
@@ -511,9 +573,35 @@ class BiznesDashboard {
 				.removeClass("is-active")
 				.filter(`[data-view="${view}"]`)
 				.addClass("is-active");
+			this.sync_panel_btn();
 			this.apply_view();
 			this.refresh();
 		});
+	}
+
+	/** Toolbardagi panel-tugmasi: joriy panel nomini ko'rsatadi.
+	 *  Menyu yopiq turganda foydalanuvchi qaysi paneldaligini BILISHI kerak —
+	 *  busiz qatlamli menyu yo'nalishni yo'qotib qo'yadi. */
+	sync_panel_btn() {
+		const meta = bd_view_meta(this.state.view);
+		const $b = this.$toolbar.find(".bd-panel-btn");
+		$b.find(".bd-panel-btn__ikon").html(frappe.utils.icon(meta.icon, "sm"));
+		$b.find(".bd-panel-btn__matn").text(meta.label);
+	}
+
+	/** Menyu qatlamini ochish/yopish. Holat SAQLANMAYDI: qatlamli menyu —
+	 *  o'tkinchi navigatsiya yuzasi, sahifa har safar yopiq holatda ochiladi
+	 *  (aks holda yuklanishda kontentni to'sib turardi). */
+	sidenav_ochiq(ochiq) {
+		this.sidenav_holati = !!ochiq;
+		this.$layout.toggleClass("is-menyu-ochiq", this.sidenav_holati);
+		this.$layout.find(".bd-sidenav__parda").prop("hidden", !this.sidenav_holati);
+		this.$toolbar
+			.find(".bd-panel-btn")
+			.attr("aria-expanded", this.sidenav_holati ? "true" : "false");
+		if (this.sidenav_holati) {
+			this.$sidenav.find(".bd-sidenav__item.is-active").trigger("focus");
+		}
 	}
 
 	/** Ko'rinishga qarab toolbar/kpi zonalarini moslash. */
@@ -587,7 +675,18 @@ class BiznesDashboard {
 				</div>`
 			: "";
 
+		//: Panel-tugmasi — eng yuqorida, sahifa sarlavhasi ostida: u navigatsiya
+		//: (qaysi paneldamiz), kompaniya/filial chiplari esa filtr. Navigatsiya
+		//: filtrlardan oldin turgani ma'qul.
 		this.$toolbar.html(`
+			<div class="od-toolbar__row bd-panel-qatori">
+				<button type="button" class="bd-panel-btn" aria-expanded="false"
+					title="${__("Panellar ro'yxati")}">
+					<span class="bd-panel-btn__ikon"></span>
+					<span class="bd-panel-btn__matn"></span>
+					<span class="bd-panel-btn__strelka"></span>
+				</button>
+			</div>
 			${chips}
 			${filial_chips}
 			<div class="od-toolbar__row">
@@ -616,6 +715,10 @@ class BiznesDashboard {
 			</div>
 			-->
 		`);
+		this.sync_panel_btn();
+		this.$toolbar.off("click.bdpanel").on("click.bdpanel", ".bd-panel-btn", () => {
+			this.sidenav_ochiq(!this.sidenav_holati);
+		});
 		if (this.ready) this.sync_toolbar_view();
 
 		// OFF:qoshimcha-filtrlar — kompaniya qiymati serverdan keladi (`get_meta().company`):
@@ -1883,6 +1986,12 @@ class BiznesDashboard {
 		const cur = data.valyuta || "UZS";
 		// So'm butun son bilan, dollar 2 kasr bilan o'qiladi
 		const pul = (qiymat) => od.money(qiymat, cur, cur === "UZS" ? 0 : 2);
+		// Aylanma qarzni necha foiz qoplaydi — nisbat yuqoridan chegaralanmagan,
+		// shuning uchun 1000% dan kattasi kasrsiz o'qiladi.
+		const foiz = (qiymat) =>
+			qiymat === null || qiymat === undefined
+				? "—"
+				: od.number(qiymat, qiymat >= 1000 ? 0 : 1) + "%";
 		const jami = data.jami || {};
 		const rows = data.rows || [];
 		const davr = this.davr_nomi(data.yil, data.oylar);
@@ -1908,9 +2017,9 @@ class BiznesDashboard {
 				<div class="od-statechip od-statechip--orange">
 					<span class="od-statechip__name">${__("Aylanma")} · ${od.esc(davr)}</span>
 					<b>${pul(jami.aylanma)}</b>
-					<span class="od-statechip__sum">${__("qarz ulushi")}: ${
-			jami.ulush === null || jami.ulush === undefined ? "—" : od.percent(jami.ulush)
-		}</span>
+					<span class="od-statechip__sum">${__("qarzning qoplanishi")}: ${foiz(
+			jami.ulush
+		)}</span>
 				</div>
 			</div>
 		`);
@@ -1930,7 +2039,7 @@ class BiznesDashboard {
 			{ key: "tolov", label: __("Oxirgi to'lov") },
 			{ key: "kun", label: __("Osilgan"), align: "right", tartib: "kun" },
 			{ key: "aylanma", label: __("Aylanma"), align: "right", tartib: "aylanma" },
-			{ key: "ulush", label: __("Qarz / aylanma"), align: "right", tartib: "ulush" },
+			{ key: "ulush", label: __("Aylanma / qarz"), align: "right", tartib: "ulush" },
 		];
 
 		const boshi = (data.sahifa - 1) * data.olcham;
@@ -1975,12 +2084,15 @@ class BiznesDashboard {
 								row.kun
 						  )}">${od.number(row.kun)} ${__("kun")}</span>`,
 				aylanma: row.aylanma > 0 ? pul(row.aylanma) : "—",
+				// Endi ko'p bo'lgani yaxshi: aylanma qarzdan qancha katta bo'lsa,
+				// qarz shuncha "yengil". Chegaralar eski 70%/30% qarz ulushining
+				// teskarisi (100/0.7 va 100/0.3).
 				ulush:
 					row.ulush === null || row.ulush === undefined
 						? "—"
 						: `<span class="${
-								row.ulush > 70 ? "od-bad" : row.ulush > 30 ? "od-warn" : "od-good"
-						  }">${od.percent(row.ulush)}</span>`,
+								row.ulush < 143 ? "od-bad" : row.ulush < 333 ? "od-warn" : "od-good"
+						  }">${foiz(row.ulush)}</span>`,
 			};
 		});
 
@@ -2066,6 +2178,14 @@ class BiznesDashboard {
 
 	render_tahlil(data) {
 		const cur = data.currency || "USD";
+		// Yil/oy almashganda tanlangan status bu davrda umuman bo'lmasligi
+		// mumkin — bo'sh jadval o'rniga filtr o'zi tushadi.
+		if (
+			this.state.mijoz_status &&
+			!(data.mijozlar || []).some((m) => m.status === this.state.mijoz_status)
+		) {
+			this.state.mijoz_status = null;
+		}
 		const metrika = this.state.tahlil_metrika || "savdo";
 		const k = data.kpi || {};
 		const oylar = data.oylar || [];
@@ -2145,9 +2265,18 @@ class BiznesDashboard {
 			pct: t.marja_pct === null ? "—" : od.percent(t.marja_pct),
 			_class: i >= 12 ? "od-row-extra" : "",
 		}));
-		const mijoz_rows = (data.mijozlar || []).map((m, i) => ({
+		// Status-filtri: server har statusdan to'liq ro'yxat yuboradi,
+		// saralash faqat shu yerda — chip bosilganda serverga borilmaydi.
+		const mijoz_hammasi = data.mijozlar || [];
+		const mijoz_filtr = this.state.mijoz_status || "";
+		const mijoz_rows = (
+			mijoz_filtr
+				? mijoz_hammasi.filter((m) => m.status === mijoz_filtr)
+				: mijoz_hammasi
+		).map((m, i) => ({
 			nr: od.number(i + 1),
 			name: od.esc(m.name),
+			status: this.status_nishon(m.status),
 			summa: od.money(m.summa, cur),
 			tannarx: od.money(m.tannarx, cur),
 			marja: `<span class="${m.marja >= 0 ? "od-good" : "od-bad"}">${od.money(m.marja, cur)}</span>`,
@@ -2212,7 +2341,7 @@ class BiznesDashboard {
 		// Qatorlar XOM belgisi bilan chiqadi (avans — minus, kreditor —
 		// minus): shunda ularni qo'shsa aynan "UMUMIY BALANS" chiqadi.
 		const bal = data.balans || {};
-		const boshqa_valyuta = ["naqd", "bank", "mijoz", "ombor", "kreditor"].some((k) =>
+		const boshqa_valyuta = ["naqd", "plastik", "bank", "mijoz", "ombor", "kreditor"].some((k) =>
 			od.money_list(bal[k]).some((e) => e.currency && e.currency !== cur)
 		);
 		const balans_blok = `
@@ -2226,7 +2355,8 @@ class BiznesDashboard {
 				<div class="od-block__body">
 					<div class="bd-balans__rows">
 						<div><span>${__("Naqd kassa")}</span><b>${this.money(bal.naqd)}</b></div>
-						<div><span>${__("Plastik / karta")}</span><b>${this.money(bal.bank)}</b></div>
+						<div><span>${__("Plastik / karta")}</span><b>${this.money(bal.plastik)}</b></div>
+						<div><span>${__("Bank")}</span><b>${this.money(bal.bank)}</b></div>
 						<div><span>${__(bal.mijoz_label || "Mijozlar balansi")}</span><b>${this.money(
 							bal.mijoz
 						)}</b></div>
@@ -2365,13 +2495,17 @@ class BiznesDashboard {
 			<div class="od-block od-block--full">
 				<div class="od-block__head"><div>
 					<h3 class="od-block__title">${__("Mijozlar — marja bilan")}</h3>
-					<p class="od-block__subtitle">${od.esc(davr_nomi)} · ${__("top-100 savdo bo'yicha")}</p>
+					<p class="od-block__subtitle">${od.esc(davr_nomi)} · ${od.esc(
+						this.mijoz_izoh(data.mijoz_status, mijoz_filtr, mijoz_rows.length)
+					)}</p>
 				</div></div>
 				<div class="od-block__body">
+					${this.mijoz_status_filtr_html(data.mijoz_status, cur)}
 					<div class="od-table-wrap" data-table="t-mijozlar">${this.table(
 						[
 							{ key: "nr", label: "#" },
 							{ key: "name", label: __("Mijoz") },
+							{ key: "status", label: __("Status") },
 							{ key: "summa", label: __("Savdo"), align: "right" },
 							{ key: "tannarx", label: __("Tannarx"), align: "right" },
 							{ key: "marja", label: __("Marja"), align: "right" },
@@ -2478,6 +2612,20 @@ class BiznesDashboard {
 			this.state.tahlil_oylar = [];
 			this.refresh_tahlil();
 		});
+		this.$sections.on("click.bdtahlil", ".bd-matritsa__katak[data-katak]", (e) => {
+			this.open_reyting_katak(String($(e.currentTarget).data("katak")));
+		});
+		this.$sections.on("keydown.bdtahlil", ".bd-matritsa__katak[data-katak]", (e) => {
+			if (e.key !== "Enter" && e.key !== " ") return;
+			e.preventDefault();
+			this.open_reyting_katak(String($(e.currentTarget).data("katak")));
+		});
+		this.$sections.on("click.bdtahlil", "[data-t-status]", (e) => {
+			const yangi = String($(e.currentTarget).data("t-status") || "");
+			this.state.mijoz_status = yangi === this.state.mijoz_status ? null : yangi || null;
+			// Ma'lumot qo'lda — metrika-almashtirgich kabi qayta so'rov yo'q.
+			if (this._tahlil_data) this.render_tahlil(this._tahlil_data);
+		});
 		this.$sections.on("click.bdtahlil", "[data-t-metrika]", (e) => {
 			const m = $(e.currentTarget).data("t-metrika");
 			if (m === this.state.tahlil_metrika) return;
@@ -2518,6 +2666,196 @@ class BiznesDashboard {
 			<div class="bd-trend__sarlavha">${__("Umumiy balans dinamikasi")}</div>
 			<div class="bd-trend__maydon">${bars}</div>
 		</div>`;
+	}
+
+	/** Mijoz-statusi nishoni (jadval katagi uchun). */
+	status_nishon(kalit) {
+		const s = BD_STATUS[kalit];
+		if (!s) return "";
+		return `<span class="bd-status bd-status--${kalit}" title="${od.esc(
+			s.izoh
+		)}">${od.esc(s.nom)}</span>`;
+	}
+
+	/** ABC×XYZ matritsasining katagi bosilganda — o'sha guruhdagi
+	 *  mijozlar ro'yxati sub-oynada.
+	 *
+	 *  Ro'yxat TALAB BO'YICHA olinadi: `get_tahlil` payloadiga 9 ta katakning
+	 *  qatorlarini ham qo'shish uni ~110 KB ga shishirardi, holbuki odatda
+	 *  bitta katak ochiladi. Server qatorlarni keshlaydi — ikkinchi katak
+	 *  darhol ochiladi. */
+	async open_reyting_katak(sinf) {
+		if (!sinf || this._katak_ochiq) return;
+		this._katak_ochiq = true;
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("{0} guruhi", [sinf]),
+			size: "large",
+			on_hide: () => {
+				this._katak_ochiq = false;
+			},
+		});
+		dialog.show();
+		dialog.$body.html(
+			`<div class="oyna-dash biznes-dash bd-katak bd-katak--yuk">${__(
+				"Yuklanmoqda..."
+			)}</div>`
+		);
+
+		try {
+			const data = await this.call("get_reyting_katak", {
+				filters: {
+					company: this.state.company,
+					cost_center: this.state.cost_center,
+					warehouse: this.state.warehouse,
+					yil: this.state.tahlil_yil,
+					oylar: this.state.tahlil_oylar,
+					sinf,
+				},
+			});
+			dialog.set_title(
+				__("{0} — {1} ta mijoz", [sinf, od.number(data.soni)])
+			);
+			dialog.$body.html(this.reyting_katak_html(data));
+		} catch (error) {
+			console.error("[biznes-dashboard] reyting-katak", error); // eslint-disable-line no-console
+			dialog.$body.html(
+				`<div class="oyna-dash biznes-dash bd-katak">${this.empty_state(
+					__("Ro'yxatni yuklashda xatolik yuz berdi."),
+					"solid-warning"
+				)}</div>`
+			);
+		}
+	}
+
+	/** Sub-oyna tanasi: guruh izohi + mijozlar jadvali. */
+	reyting_katak_html(data) {
+		const cur = data.currency || "USD";
+		const sinf = data.sinf || "";
+		const rows = data.rows || [];
+		if (!rows.length) {
+			return `<div class="oyna-dash biznes-dash bd-katak">${this.empty_state(
+				__("Bu guruhda mijoz yo'q.")
+			)}</div>`;
+		}
+
+		const jadval = this.table(
+			[
+				{ key: "nr", label: "#" },
+				{ key: "name", label: __("Mijoz") },
+				{ key: "summa", label: __("Savdo"), align: "right" },
+				{ key: "tannarx", label: __("Tannarx"), align: "right" },
+				{ key: "marja", label: __("Marja"), align: "right" },
+				{ key: "ulush", label: __("Ulush"), align: "right" },
+			],
+			rows.map((r, i) => ({
+				nr: od.number(i + 1),
+				name: od.esc(r.name),
+				summa: od.money(r.summa, cur),
+				tannarx: od.money(r.tannarx, cur),
+				marja: `<span class="${r.marja >= 0 ? "od-good" : "od-bad"}">${od.money(
+					r.marja,
+					cur
+				)}</span>`,
+				// Ulush — davr AYLANMASIDAGI ulush (ABC shunga qurilgan),
+				// marjadagi emas.
+				ulush: od.percent(r.ulush),
+			}))
+		);
+
+		return `
+			<div class="oyna-dash biznes-dash bd-katak">
+				<div class="bd-katak__bosh">
+					<span class="bd-sinf bd-sinf--${sinf[0]}">${sinf[0]}</span>
+					<span class="bd-sinf bd-sinf--${sinf[1]}">${sinf[1]}</span>
+					<b>${od.esc(BD_SINF_NOM[sinf[0]] || "")} · ${od.esc(
+						BD_SINF_NOM[sinf[1]] || ""
+					)}</b>
+					<em>${od.money(data.savdo, cur)}
+						<span class="${(data.marja || 0) >= 0 ? "od-good" : "od-bad"}">${od.money(
+							data.marja || 0,
+							cur
+						)}</span></em>
+				</div>
+				${
+					BD_SINF_TAVSIYA[sinf]
+						? `<p class="bd-katak__tavsiya">${od.esc(BD_SINF_TAVSIYA[sinf])}</p>`
+						: ""
+				}
+				<div class="od-table-wrap is-expanded">${jadval}</div>
+			</div>`;
+	}
+
+	/** Jadval sarlavhasidagi izoh: nechta qator ko'rsatilyapti va
+	 *  filtrlangan status jami nechta mijozdan iborat. Guruh serverda
+	 *  kesilgan bo'lsa (MIJOZ_STATUS_LIMIT) shu ham aytiladi — aks holda
+	 *  chipdagi son bilan jadvaldagi qator soni farq qilib, xatoga o'xshardi. */
+	mijoz_izoh(st, filtr, korinadi) {
+		if (!filtr) return __("savdo bo'yicha");
+		const meta = BD_STATUS[filtr] || {};
+		const h = ((st || {}).yigindi || []).find((x) => x.kalit === filtr);
+		const jami = h ? h.soni : korinadi;
+		return jami > korinadi
+			? __("{0} — {1} tadan eng yirik {2} tasi", [
+					meta.nom || filtr,
+					od.number(jami),
+					od.number(korinadi),
+			  ])
+			: __("{0} — {1} ta", [meta.nom || filtr, od.number(korinadi)]);
+	}
+
+	/** Status-filtri: chip qatori. Har chipda guruhning TO'LIQ mijoz soni va
+	 *  marjasi turadi (jadvalga kesilgani emas) — chip biznes holatini
+	 *  ko'rsatadi, jadval esa uning eng yirik qismini. */
+	mijoz_status_filtr_html(st, cur) {
+		if (!st || !st.soni || st.ort_pct === null || st.ort_pct === undefined) {
+			return "";
+		}
+		const joriy = this.state.mijoz_status || "";
+		const jami_marja = st.jami_marja || 0;
+
+		const chip = (kalit, nom, soni, marja, izoh) =>
+			`<button type="button" class="bd-chip bd-chip--st${
+				kalit ? " bd-chip--st-" + kalit : ""
+			}${joriy === kalit ? " is-active" : ""}" data-t-status="${kalit}" title="${od.esc(
+				izoh
+			)}">${od.esc(nom)}<em>${od.number(soni)}</em></button>`;
+
+		const chiplar = [
+			chip(
+				"",
+				__("Hammasi"),
+				st.soni,
+				jami_marja,
+				__("Barcha statusli mijozlar — {0}", [od.money(jami_marja, cur)])
+			),
+		];
+		(st.yigindi || []).forEach((h) => {
+			if (!h.soni) return;
+			const meta = BD_STATUS[h.kalit] || {};
+			const ulush = jami_marja
+				? " · " + od.percent((h.marja / jami_marja) * 100)
+				: "";
+			chiplar.push(
+				chip(
+					h.kalit,
+					meta.nom || h.kalit,
+					h.soni,
+					h.marja,
+					`${meta.izoh || ""}\n${__("Marja")}: ${od.money(h.marja, cur)}${ulush}`
+				)
+			);
+		});
+
+		return `
+			<div class="bd-sfiltr">
+				<span class="bd-sfiltr__label">${__("Status")}</span>
+				${chiplar.join("")}
+				<span class="bd-sfiltr__izoh">${__("chegara: savdo > {0} · marja > {1}", [
+					od.money(st.ort_savdo, cur),
+					od.percent(st.ort_pct),
+				])}</span>
+			</div>`;
 	}
 
 	/** Oylik marja ustun-grafigi (kutubxonasiz): ustun balandligi — marja
@@ -2840,13 +3178,16 @@ class BiznesDashboard {
 			const ulush = r.savdo ? (c.savdo / r.savdo) * 100 : 0;
 			const foiz = c.savdo > 0 ? 10 + (c.savdo / eng_katta) * 62 : 0;
 			// To'q katakda matn oq bo'lsin (kontrast buzilmasin).
+			// Bo'sh katakda ochadigan narsa yo'q — u bosilmaydi.
 			return `<div class="bd-matritsa__katak${c.soni ? "" : " is-bosh"}${
 				foiz >= 45 ? " is-toq" : ""
-			}"
+			}"${c.soni ? ` data-katak="${abc}${xyz}" role="button" tabindex="0"` : ""}
 				title="${abc}${xyz} — ${od.number(c.soni)} ${__("mijoz")}, ${od.money(
 				c.savdo,
 				cur
-			)}&#10;${od.esc(BD_SINF_TAVSIYA[abc + xyz] || "")}"
+			)}&#10;${od.esc(BD_SINF_TAVSIYA[abc + xyz] || "")}${
+				c.soni ? "&#10;&#10;" + __("Ro'yxatni ochish uchun bosing") : ""
+			}"
 				style="background: color-mix(in srgb, var(--bd-primary) ${foiz.toFixed(
 					0
 				)}%, var(--fg-color))">
@@ -2857,7 +3198,9 @@ class BiznesDashboard {
 		const matritsa_html = `
 			<div class="bd-matritsa">
 				<div class="bd-matritsa__sarlavha">${__("ABC × XYZ matritsasi")}
-					<small>${__("katakda: mijozlar soni va aylanmadagi ulushi")}</small></div>
+					<small>${__(
+						"katakda: mijozlar soni va aylanmadagi ulushi · katakni bosing — ro'yxat chiqadi"
+					)}</small></div>
 				<div class="bd-matritsa__panjara">
 					<span class="bd-matritsa__burchak">${__("hajm")} ↓<br>${__(
 						"barqarorlik"
@@ -3267,6 +3610,9 @@ class BiznesDashboard {
 				period_start_date: this.context.from_date,
 				period_end_date: this.context.to_date,
 				periodicity: "Monthly",
+				// Blok filial bo'yicha ko'rsatilayotgan bo'lsa, hisobot ham
+				// o'sha filialda ochilsin — aks holda raqamlar mos tushmaydi.
+				cost_center: this.state.cost_center || undefined,
 			})
 		);
 
@@ -3756,7 +4102,7 @@ class BiznesDashboard {
 					_click: () =>
 						this.open_report("DDS", row.mode_of_payment ? { mode_of_payment: row.mode_of_payment } : {}),
 					name: `<b>${od.esc(row.label)}</b><small>${od.esc(
-						row.kind === "bank" ? __("bank / plastik") : __("naqd")
+						BD_KASSA_KIND[row.kind] || __("naqd")
 					)} · ${od.esc(row.account_currency)}</small>`,
 					// Valyuta sarlavhada bir marta ko'rsatilgan — ustunlarda takrorlanmaydi.
 					// Istisno: hisobning O'Z valyutasidagi qoldiq (pastdagi kichik qator),

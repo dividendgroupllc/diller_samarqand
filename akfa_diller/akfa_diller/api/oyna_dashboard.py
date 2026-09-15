@@ -77,8 +77,9 @@ QABUL QILINGAN FARAZLAR (assumptions) — muhim!
 4. KASSA / BANK. `Mode of Payment Account` — ilovadagi kassa hisoblarining
    yagona ro'yxati (DDS hisoboti ham shundan foydalanadi). Oyna sexda barcha
    kassa hisoblari `account_type = Cash`, shuning uchun naqd/banksiz ajratish
-   hisob nomi bo'yicha (BANK_HINTS) amalga oshiriladi. Har bir hisob
-   dashboardda alohida ko'rsatiladi, shuning uchun tasnif shaffof.
+   hisob nomi bo'yicha (KARTA_HINTS / BANK_HINTS) amalga oshiriladi:
+   naqd / plastik-karta / bank. Har bir hisob dashboardda alohida
+   ko'rsatiladi, shuning uchun tasnif shaffof.
 
 5. QARZ YOSHI (aging). Oyna sexda mijoz qarzi Sales Invoice orqali emas,
    ochilish qoldig'i (Journal Entry) va Kassa to'lovlari orqali yuritiladi —
@@ -124,9 +125,22 @@ OVERDUE_AFTER_DAYS = 30
 #: Zaxira "kam qolgan" deb belgilanadigan chegara — necha kunlik sarfga yetadi.
 LOW_STOCK_DAYS_COVER = 14
 
-#: Kassa hisoblarini "bank/plastik" deb tasniflash uchun nom bo'laklari.
-#: Oyna sexda barcha kassa hisoblari account_type = "Cash" bo'lgani uchun kerak.
-BANK_HINTS = ("bank", "банк", "р/с", "р/c", "plastik", "пластик", "karta", "карта", "card")
+#: Kassa hisoblari uch qatorga ajratiladi: naqd / plastik-karta / bank.
+#: Ajratish HISOB NOMI bo'yicha, chunki ilovada deyarli barcha kassa hisoblari
+#: `account_type = "Cash"` deb ochilgan — ERPNext turi ma'lumot bermaydi.
+#:
+#: Tartib muhim: avval KARTA tekshiriladi. "Bank karta" kabi nom ikkala
+#: ro'yxatga ham tushadi, lekin u avvalo karta.
+KARTA_HINTS = ("plastik", "пластик", "karta", "карта", "card")
+
+#: Bank qatori: hisob-raqam (р/с), o'tkazmalar (перечисления) va onlayn
+#: to'lov tizimlari. Bular naqd ham, plastik ham emas — pul bankda yotadi
+#: (foydalanuvchi tanlovi 2026-09-15: ular uchun alohida "Bank" qatori).
+BANK_HINTS = (
+	"bank", "банк", "р/с", "р/c",
+	"perechesleniya", "perechisleniya", "перечислен",
+	"click", "payme", "uzum",
+)
 
 #: COGS/baholash hisoblari — bular "operatsion xarajat" emas, tannarx.
 COGS_ACCOUNT_TYPES = (
@@ -515,8 +529,19 @@ def get_cash_accounts(company, only=None):
 
 	result = []
 	for acc in accounts:
-		haystack = "{} {}".format(acc.name, mode_by_account.get(acc.name) or "").lower()
-		is_bank = acc.account_type == "Bank" or any(h in haystack for h in BANK_HINTS)
+		# Tasnif faqat SCHYOT nomi bo'yicha. Mode of Payment nomi ilgari ham
+		# qaralardi va shuning uchun "Samarqand Наличие usd" (naqd) hisobi
+		# "Р/С банк" deb nomlangan Mode of Payment tufayli plastikka tushib
+		# qolgan edi — 162 853 USD noto'g'ri qatorda turardi (audit
+		# 2026-09-15). Schyot nomi hisobning o'z haqiqati, MoP esa faqat
+		# to'lov usulining yorlig'i.
+		nom = acc.name.lower()
+		if any(h in nom for h in KARTA_HINTS):
+			kind = "plastik"
+		elif acc.account_type == "Bank" or any(h in nom for h in BANK_HINTS):
+			kind = "bank"
+		else:
+			kind = "cash"
 		result.append(
 			frappe._dict(
 				{
@@ -524,7 +549,7 @@ def get_cash_accounts(company, only=None):
 					"account_name": acc.account_name,
 					"currency": acc.account_currency,
 					"mode_of_payment": mode_by_account.get(acc.name),
-					"kind": "bank" if is_bank else "cash",
+					"kind": kind,
 				}
 			)
 		)
@@ -652,6 +677,40 @@ def _so_conditions(ctx, params, alias="so"):
 	return conditions
 
 
+def _item_cc_condition(ctx, params, alias="sii"):
+	"""Filial (cost center) sharti — hujjat QATORI darajasida.
+
+	Sotuv hujjatining sarlavhasida filial o'lchovi yo'q: u faqat qatorda
+	(`Sales Invoice Item.cost_center`) bo'ladi. Guruh-cost-center tanlansa
+	butun osti qamraladi — `_gl_extra_conditions` bilan bir xil qoida,
+	shuning uchun natija GL Income bilan tiyingacha mos tushadi.
+	"""
+	if not ctx.cost_center:
+		return ""
+	lft, rgt = frappe.db.get_value("Cost Center", ctx.cost_center, ["lft", "rgt"]) or (None, None)
+	if lft is None:
+		params["cost_center"] = ctx.cost_center
+		return " AND {0}.cost_center = %(cost_center)s".format(alias)
+	params["cc_lft"], params["cc_rgt"] = lft, rgt
+	return """ AND {0}.cost_center IN (
+		SELECT cc.name FROM `tabCost Center` cc WHERE cc.lft >= %(cc_lft)s AND cc.rgt <= %(cc_rgt)s
+	)""".format(alias)
+
+
+def _item_cc_exists(ctx, params, parent="si.name", table="Sales Invoice Item"):
+	"""Sarlavha-darajadagi so'rovlar uchun filial sharti (soni/mijozi uchun).
+
+	Summa emas, SANOQ olinadigan joylarda ishlatiladi: hujjatda tanlangan
+	filialga tegishli birorta qator bo'lsa — hujjat shu filialga sanaladi.
+	"""
+	cc = _item_cc_condition(ctx, params, alias="cc_item")
+	if not cc:
+		return ""
+	return """ AND EXISTS (
+		SELECT 1 FROM `tab{table}` cc_item WHERE cc_item.parent = {parent}{cc}
+	)""".format(table=table, parent=parent, cc=cc)
+
+
 def _sales_totals(ctx, from_date, to_date, docstatus=DOCSTATUS_SUBMITTED):
 	"""Sales Order bo'yicha jami: summa, soni, m², mijozlar soni.
 
@@ -703,6 +762,12 @@ def _revenue(ctx, from_date, to_date):
 
 	GL Income hisobi kompaniya valyutasida (USD) yuritilgani uchun undan olsak
 	so'mdagi savdo dollarda ko'rinardi — shuning uchun summa hujjatdan olinadi.
+
+	FILIAL tanlansa bundan chetlashiladi: filial o'lchovi faqat QATORda bo'lgani
+	uchun summa ham qatordan (`base_net_amount`, kompaniya valyutasida) olinadi.
+	Shunda «Savdo» bo'limi Umumiy paneldagi «Savdo» kartasi (`_filial_savdo`) va
+	GL Income bilan aynan bir xil chiqadi. Filial-filtr faqat savdo (trade)
+	kompaniyalarida bor, ular esa kompaniya valyutasida savdo qiladi.
 	"""
 	params = {"company": ctx.company, "from_date": from_date, "to_date": to_date}
 	conditions = ""
@@ -710,26 +775,34 @@ def _revenue(ctx, from_date, to_date):
 		params["customer"] = ctx.customer
 		conditions += " AND si.customer = %(customer)s"
 
+	join, amount = "", "SUM(si.grand_total)"
+	if ctx.cost_center:
+		join = "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name"
+		amount = "SUM(sii.base_net_amount)"
+		conditions += _item_cc_condition(ctx, params)
+
 	rows = frappe.db.sql(
 		"""
-		SELECT si.currency, si.is_return, SUM(si.grand_total) AS amount
+		SELECT si.currency, si.is_return, {amount} AS amount
 		FROM `tabSales Invoice` si
+		{join}
 		WHERE si.company = %(company)s
 		  AND si.docstatus = 1
 		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
 		  {conditions}
 		GROUP BY si.currency, si.is_return
-		""".format(conditions=conditions),
+		""".format(amount=amount, join=join, conditions=conditions),
 		params,
 		as_dict=True,
 	)
 
 	gross, returns = {}, {}
 	for row in rows:
+		currency = ctx.company_currency if ctx.cost_center else row.currency
 		if cint(row.is_return):
-			_money_add(returns, row.currency, -flt(row.amount))
+			_money_add(returns, currency, -flt(row.amount))
 		else:
-			_money_add(gross, row.currency, row.amount)
+			_money_add(gross, currency, row.amount)
 
 	return frappe._dict(
 		{"gross": gross, "returns": returns, "net": _money_diff(gross, returns)}
@@ -775,9 +848,13 @@ def _cogs(ctx, from_date, to_date):
 
 
 def _invoice_stats(ctx, from_date, to_date):
-	"""Davrdagi tasdiqlangan hisob-fakturalar soni va mijozlar soni."""
+	"""Davrdagi tasdiqlangan hisob-fakturalar soni va mijozlar soni.
+
+	Filial tanlansa — o'sha filialga tegishli qatori bor hujjatlar sanaladi
+	(`_filial_savdo` dagi COUNT(DISTINCT ...) bilan bir xil ta'rif).
+	"""
 	params = {"company": ctx.company, "from_date": from_date, "to_date": to_date}
-	conditions = ""
+	conditions = _item_cc_exists(ctx, params)
 	if ctx.customer:
 		params["customer"] = ctx.customer
 		conditions += " AND si.customer = %(customer)s"
@@ -1156,14 +1233,15 @@ def _get_overview(ctx):
 
 		# --- 4 & 5. Kassa va bank ------------------------------------------
 		accounts = get_cash_accounts(ctx.company, only=ctx.cash_account)
-		cash_accounts = [a for a in accounts if a.kind == "cash"]
-		bank_accounts = [a for a in accounts if a.kind == "bank"]
-
-		for key, group, label, icon in (
-			("cash", cash_accounts, _("Naqd kassa"), "wallet"),
-			("bank", bank_accounts, _("Bank / plastik"), "bank"),
+		for key, label, icon in (
+			("cash", _("Naqd kassa"), "wallet"),
+			("plastik", _("Plastik / karta"), "bank"),
+			("bank", _("Bank"), "bank"),
 		):
+			group = [a for a in accounts if a.kind == key]
 			names = [a.name for a in group]
+			if not names:
+				continue
 			now_balance = _gl_balance(ctx, names, ctx.to_date)
 			prev_balance = _gl_balance(ctx, names, ctx.prev_to)
 			cards.append(
@@ -1429,7 +1507,8 @@ def _year_revenue_trend(ctx, year):
 	"""Yilning 12 oyi bo'yicha sotuv va vozvrat (hujjat valyutasida).
 
 	Davr filtri qanday bo'lishidan qat'i nazar butun kalendar yil qaytariladi —
-	grafikda oylarni taqqoslash uchun.
+	grafikda oylarni taqqoslash uchun. Filial tanlansa summa `_revenue` dagidek
+	qator darajasidan olinadi.
 	"""
 	months = ["{0}-{1:02d}-01".format(year, m) for m in range(1, 13)]
 	trend = {key: {"label": key, "amount": {}, "returns": {}} for key in months}
@@ -1444,27 +1523,35 @@ def _year_revenue_trend(ctx, year):
 		params["customer"] = ctx.customer
 		conditions += " AND si.customer = %(customer)s"
 
+	join, amount = "", "SUM(si.grand_total)"
+	if ctx.cost_center:
+		join = "JOIN `tabSales Invoice Item` sii ON sii.parent = si.name"
+		amount = "SUM(sii.base_net_amount)"
+		conditions += _item_cc_condition(ctx, params)
+
 	bucket = _date_group_sql("si.posting_date", "month")
 	for row in frappe.db.sql(
 		"""
-		SELECT {bucket} AS bucket, si.currency, si.is_return, SUM(si.grand_total) AS amount
+		SELECT {bucket} AS bucket, si.currency, si.is_return, {amount} AS amount
 		FROM `tabSales Invoice` si
+		{join}
 		WHERE si.company = %(company)s
 		  AND si.docstatus = 1
 		  AND si.posting_date BETWEEN %(from_date)s AND %(to_date)s
 		  {conditions}
 		GROUP BY bucket, si.currency, si.is_return
-		""".format(bucket=bucket, conditions=conditions),
+		""".format(bucket=bucket, amount=amount, join=join, conditions=conditions),
 		params,
 		as_dict=True,
 	):
 		entry = trend.get(str(row.bucket))
 		if not entry:
 			continue
+		currency = ctx.company_currency if ctx.cost_center else row.currency
 		if cint(row.is_return):
-			_money_add(entry["returns"], row.currency, -flt(row.amount))
+			_money_add(entry["returns"], currency, -flt(row.amount))
 		else:
-			_money_add(entry["amount"], row.currency, row.amount)
+			_money_add(entry["amount"], currency, row.amount)
 
 	return [trend[key] for key in months]
 
@@ -1484,7 +1571,8 @@ def _order_book(ctx):
 		"to_date": ctx.to_date,
 		"docstatus": DOCSTATUS_DRAFT,
 	}
-	conditions = _so_conditions(ctx, params)
+	conditions = _so_conditions(ctx, params) + _item_cc_exists(
+		ctx, params, parent="so.name", table="Sales Order Item")
 
 	states = {}
 	for row in frappe.db.sql(

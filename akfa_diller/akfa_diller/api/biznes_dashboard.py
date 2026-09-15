@@ -213,6 +213,65 @@ def _wh_sharti(ctx, params, ustun="sle.warehouse"):
 	return " AND {0} = %(wh)s".format(ustun)
 
 
+def _sle_cc(ctx, params):
+	"""SLE-tannarxni FILIAL bo'yicha qirqish uchun (JOIN, shart) juftligi.
+
+	Sotuv hujjatining sarlavhasida filial o'lchovi yo'q — u faqat QATORDA
+	(`Sales Invoice Item.cost_center`). SLE qatori esa `voucher_detail_no`
+	orqali aynan o'sha hisob-faktura qatoriga bog'langan (2026-09 holati:
+	80 501 SI-SLE qatoridan hammasi bog'langan), shuning uchun bog'lanish
+	aniq — item_code bo'yicha taxminiy moslashtirish kerak emas.
+
+	Busiz filial rejimida SAVDO filialdan, TANNARX esa butun kompaniyadan
+	olinardi: Kattaqo'rg'on / Mitan 2026 — savdo 241 249, tannarx 1 411 498,
+	marja% = -485 (jonli tekshiruv 2026-09-15). To'g'ri qiymat: 6.1%.
+	"""
+	if not ctx.cost_center:
+		return "", ""
+	return (
+		" JOIN `tabSales Invoice Item` sii_cc ON sii_cc.name = sle.voucher_detail_no",
+		_cc_sharti(ctx, params, "sii_cc.cost_center"),
+	)
+
+
+def _mijoz_tannarx(ctx, yil, oylar):
+	"""Mijoz kesimida tannarx: ({customer: tannarx}, Oyna sex qo'shimchasi).
+
+	`get_tahlil` (mijozlar-jadvali) va `get_reyting_katak` (matritsa katagi)
+	bir xil marjani ko'rsatishi uchun mantiq shu yerda YAGONA joyda turadi:
+	SLE-tannarx + filial-qirqimi + Oyna sexning Material Issue oqimi.
+
+	Ikkinchi qiymat (mi) alohida qaytadi, chunki KPI-tannarxiga u butunicha
+	qo'shiladi (mijoz kesimiga emas).
+	"""
+	params = {"company": ctx.company, "yil": yil}
+	oy_sharti = ""
+	if oylar:
+		oy_sharti = " AND MONTH(si.posting_date) IN %(oylar)s"
+		params["oylar"] = tuple(oylar)
+	wh = _wh_sharti(ctx, params, "sle.warehouse")
+	sle_join, sle_cc = _sle_cc(ctx, params)
+
+	tannarx_m = {}
+	for r in frappe.db.sql(
+		"""SELECT si.customer, SUM(-sle.stock_value_difference) AS t
+		   FROM `tabStock Ledger Entry` sle
+		   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no{join}
+		   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
+		     AND si.company = %(company)s AND si.docstatus = 1
+		     AND YEAR(si.posting_date) = %(yil)s{oy}{scc}
+		   GROUP BY si.customer""".format(
+			oy=oy_sharti, wh=wh, join=sle_join, scc=sle_cc),
+		params, as_dict=True):
+		tannarx_m[r.customer] = flt(r.t)
+
+	# Oyna sex oqimi: tannarx zakazga bog'langan Material Issue'da
+	mi_tannarx = _mi_tannarx(ctx, yil, oylar)
+	for mijoz_kaliti, qiymat in mi_tannarx.items():
+		tannarx_m[mijoz_kaliti] = tannarx_m.get(mijoz_kaliti, 0.0) + qiymat
+	return tannarx_m, mi_tannarx
+
+
 def _mi_tannarx(ctx, yil, oylar):
 	"""Zakazga bog'langan Material Issue tannarxi — MIJOZ kesimida.
 
@@ -356,6 +415,10 @@ def _minus_positions(ctx, to_date):
 def _trade_overview(ctx):
 	cards = []
 	valyuta = ctx.company_currency
+	# Kartadan ochiladigan ro'yxat/hisobot ham TANLANGAN FILIALDA ochilsin.
+	# Aks holda karta filial bo'yicha, ochilgan hisobot esa butun kompaniya
+	# bo'yicha bo'lib, foydalanuvchi raqamlarni solishtira olmaydi.
+	filial = {"cost_center": ctx.cost_center} if ctx.cost_center else {}
 
 	# 1. Savdo (SI, hujjat valyutasida) + delta.
 	# Filial tanlangan bo'lsa — item-darajada (SI sarlavhasida filial yo'q).
@@ -397,7 +460,8 @@ def _trade_overview(ctx):
 		"delta": od._delta(now_pe.amount, prev_pe.amount),
 		"details": [{"label": _("to'lov"), "value": now_pe.docs, "format": "int"}],
 		"route": ["List", "Payment Entry"],
-		"route_options": {"company": ctx.company, "payment_type": "Receive", "docstatus": 1},
+		"route_options": dict(
+			{"company": ctx.company, "payment_type": "Receive", "docstatus": 1}, **filial),
 	})
 
 	# 3. Yalpi natija (GL: daromad − xarajat, kompaniya valyutasida)
@@ -468,7 +532,8 @@ def _trade_overview(ctx):
 		"as_of": True,
 		"details": [{"label": _("mijoz"), "value": mijoz.qarzdor, "format": "int"}],
 		"route": ["query-report", "Accounts Receivable"],
-		"route_options": {"company": ctx.company, "report_date": str(ctx.to_date)},
+		"route_options": dict(
+			{"company": ctx.company, "report_date": str(ctx.to_date)}, **filial),
 	})
 	cards.append({
 		"key": "advance",
@@ -480,7 +545,8 @@ def _trade_overview(ctx):
 		"as_of": True,
 		"details": [{"label": _("mijoz"), "value": mijoz.avansli, "format": "int"}],
 		"route": ["query-report", "Accounts Receivable"],
-		"route_options": {"company": ctx.company, "report_date": str(ctx.to_date)},
+		"route_options": dict(
+			{"company": ctx.company, "report_date": str(ctx.to_date)}, **filial),
 	})
 
 	# 8. Minus-ombor (nazorat kartasi)
@@ -610,7 +676,8 @@ def get_mijozlar(filters=None):
 	"""MIJOZLAR TAHLILI: qarz ro'yxati — qidiruv, saralash va sahifalash bilan.
 
 	Har qator: qarz (yoki avans), 30 kunlik o'zgarish (MIJOZ_TREND_KUN), oxirgi
-	to'lovdan beri o'tgan kun va qarzning TANLANGAN DAVRDAGI aylanmaga nisbati.
+	to'lovdan beri o'tgan kun va TANLANGAN DAVRDAGI aylanmaning qarzga nisbati
+	(qarz davr aylanmasi bilan necha foiz qoplanadi — ko'p bo'lgani yaxshi).
 	Aylanma davri — paneldagi yil/oy chiplari (`yil`, `oylar`).
 
 	Qarz esa DOIM bugungi (to_date) qoldiq: u davr emas, holat ko'rsatkichi.
@@ -766,12 +833,11 @@ def get_mijozlar(filters=None):
 			),
 			"oxirgi_harakat": d["oxirgi_harakat"],
 			"aylanma": aylanma,
-			# Qarz aylanmaning necha foizi (foydalanuvchi tanlovi 2026-09-10)
-			"ulush": (
-				round(qarz / aylanma * 100, 1)
-				if aylanma > MIJOZ_NOL and qarz > MIJOZ_NOL
-				else None
-			),
+			# Aylanma qarzning necha foizi — qarz davr aylanmasi bilan qanchalik
+			# qoplanadi (foydalanuvchi tanlovi 2026-09-15: nisbat teskarisiga
+			# o'girildi). Yuqori foiz yaxshi. Qarzi yo'q yoki avansli mijozda
+			# nisbat ma'nosiz; aylanmasi yo'q qarzdorda esa 0% — eng yomoni.
+			"ulush": round(aylanma / qarz * 100, 1) if qarz > MIJOZ_NOL else None,
 		})
 
 	if qidiruv:
@@ -806,7 +872,7 @@ def get_mijozlar(filters=None):
 			"avansli": avansli,
 			"mijozlar": jami_qatorlar,
 			"ulush": (
-				round(jami_qarz / jami_aylanma * 100, 1) if jami_aylanma > MIJOZ_NOL else None
+				round(jami_aylanma / jami_qarz * 100, 1) if jami_qarz > MIJOZ_NOL else None
 			),
 		},
 		sahifa=sahifa,
@@ -1140,6 +1206,71 @@ XYZ_CHEGARA = (10.0, 25.0)
 #: hammasi "Z" bo'lib qolardi (jonli tekshiruv 2026-09-11).
 XYZ_FAOL_ULUSH = 5.0
 
+#: MIJOZ STATUSI (2x2) — ikkita MUSTAQIL o'q, ikkalasi ham kompaniyaning o'z
+#: o'rtachasiga taqqoslanadi:
+#:   X = savdo  > o'rtacha savdo   (jami savdo / mijozlar soni)
+#:   Y = marja% > o'rtacha marja%  (jami marja / jami savdo — TORTILGAN)
+#: Y uchun aynan FOIZ olinadi, summa emas: marja = savdo x marja%, shuning
+#: uchun "marja summasi > o'rtacha" deyilsa ikkala o'q ham "kim ko'p oladi"
+#: degan bitta savolni so'rab qolardi (Kattaqo'rg'on 2026: savdo<->marja
+#: summasi korrelyatsiyasi 0.44, savdo<->marja% esa 0.04 — ya'ni foiz
+#: savdodan mustaqil va matritsa shundagina ma'noga ega bo'ladi).
+#: Tortilgan o'rtacha AVG(marja%) emas: oddiy o'rtacha 14$ savdo qilgan
+#: mijozni 83 000$ qilgan bilan teng vaznda oladi (3.65% va 4.70% — jonli
+#: tekshiruv 2026-09-15).
+STATUS_GOLD = "gold"
+STATUS_HAJM = "hajm"
+STATUS_POTENSIAL = "potensial"
+STATUS_ODDIY = "oddiy"
+STATUS_ZARAR = "zarar"
+STATUS_TEKSHIRISH = "tekshirish"
+#: Frontenddagi ko'rsatish tartibi (yigindida ham shu tartib).
+STATUS_TARTIB = (STATUS_GOLD, STATUS_HAJM, STATUS_POTENSIAL, STATUS_ODDIY,
+                 STATUS_ZARAR, STATUS_TEKSHIRISH)
+#: Tannarxi yozilmagan mijozni ajratish chegarasi. Sabab: sotish paytida
+#: ombor minusda bo'lsa ERPNext SLE qatorini yozadi-yu
+#: `stock_value_difference = 0` qoldiradi — tannarx 0, marja = savdo,
+#: marja% = 100%. Filtrsiz aynan shunday mijoz ro'yxat tepasida "eng foydali"
+#: bo'lib chiqadi (Kattaqo'rg'on 2026: Достон Пардаев 87.5%, TRIO 6000
+#: pozitsiyalari — jonli tekshiruv 2026-09-15).
+#:
+#: Chegara NISBIY ham bo'lishi shart: 60% Kattaqo'rg'on uchun (o'rtacha 4.7%)
+#: to'g'ri, lekin Oyna sex uchun (o'rtacha 54%) normal mijozlarning yarmini
+#: "shubhali" deb belgilab qo'yardi. Shuning uchun ikkovining KATTASI olinadi.
+STATUS_TANNARX_SHUBHA = 60.0
+#: Yuqori marjali biznesda (Oyna sex) chegara o'rtachaning shuncha barobari.
+STATUS_SHUBHA_NISBAT = 2.0
+#: Mijozlar-jadvaliga HAR STATUSDAN shuncha qator ketadi (savdo bo'yicha
+#: eng yiriklari). 100 dan kam qilib bo'lmaydi: global top-100 birlashmaga
+#: butunlay kirishi va "Hammasi" ko'rinishi o'zgarmay qolishi shunga bog'liq.
+MIJOZ_STATUS_LIMIT = 100
+
+
+def _shubha_chegara(ort_pct):
+	"""Marja% shu chegaradan oshsa — tannarx to'liq emas deb qaraladi."""
+	return max(STATUS_TANNARX_SHUBHA, flt(ort_pct) * STATUS_SHUBHA_NISBAT)
+
+
+def _mijoz_statusi(summa, tannarx, marja_pct, ort_savdo, ort_pct):
+	"""Mijozga 2x2 matritsa bo'yicha status beradi (yuqoridagi izohga qarang).
+
+	Chetki holatlar avval tekshiriladi: tannarxi yo'q mijoz "gold" bo'lib
+	qolmasin, zarar keltiruvchisi esa "oddiy"lar orasida ko'rinmay ketmasin.
+	"""
+	if marja_pct is None or flt(summa) <= 0:
+		return None
+	# Tannarx umuman yozilmagan — marja% 100% chiqadi va uni hech qanday
+	# nisbiy chegara ushlab qololmaydi, shuning uchun alohida tekshiriladi.
+	if flt(tannarx) <= 0 or marja_pct > _shubha_chegara(ort_pct):
+		return STATUS_TEKSHIRISH
+	if marja_pct < 0:
+		return STATUS_ZARAR
+	yirik = flt(summa) > ort_savdo
+	foydali = marja_pct > ort_pct
+	if yirik:
+		return STATUS_GOLD if foydali else STATUS_HAJM
+	return STATUS_POTENSIAL if foydali else STATUS_ODDIY
+
 
 def _mijoz_reyting(ctx, yil, oylar):
 	"""Davrda ishlangan mijozlar soni + ABC/XYZ reytingi.
@@ -1292,6 +1423,74 @@ def _mijoz_reyting(ctx, yil, oylar):
 	}, qatorlar
 
 
+@frappe.whitelist()
+def get_reyting_katak(filters=None):
+	"""ABC x XYZ matritsasining BITTA katagidagi mijozlar ro'yxati.
+
+	Matritsa `get_tahlil` payloadida faqat SANOQ bilan keladi. Qatorlarni ham
+	o'sha yerda yuborish Samarqand Diller'da payloadni ~110 KB ga shishirardi,
+	holbuki foydalanuvchi 9 ta katakdan bittasini ochadi (ko'pincha bittasini
+	ham emas). Shuning uchun ro'yxat TALAB BO'YICHA olinadi.
+
+	Mijoz-qatorlari butunicha keshlanadi (katak kesimida emas): birinchi
+	katak ochilganda hisob bir marta bo'ladi, qolgan sakkiztasi keshdan
+	keladi — ular baribir bitta davrning bitta hisobidan chiqadi.
+
+	filters: company, yil, oylar, sinf ("AX", "BZ", ...).
+	"""
+	filters = od._parse_filters(filters)
+	ctx = _ctx(dict(filters))
+	yil, oylar = _yil_oylar(ctx, filters)
+
+	sinf = str(filters.get("sinf") or "").strip().upper()
+	if len(sinf) != 2 or sinf[0] not in "ABC" or sinf[1] not in "XYZ":
+		frappe.throw(_("Noto'g'ri sinf: {0}").format(sinf or "—"))
+
+	kesh_ctx = frappe._dict(dict(
+		ctx, from_date="{0}-01-01".format(yil), to_date="{0}-12-31".format(yil),
+		customer=",".join(str(o) for o in oylar),
+	))
+	def qurish():
+		# Reyting qatorlarida savdo bor, tannarx yo'q — mijozlar-jadvalidagi
+		# BIR XIL manbadan qo'shiladi, shunda ikki joyda ikki xil marja
+		# chiqmaydi.
+		qatorlar = _mijoz_reyting(ctx, yil, oylar)[1]
+		tannarx_m = _mijoz_tannarx(ctx, yil, oylar)[0]
+		for q in qatorlar:
+			t = flt(tannarx_m.get(q["kalit"], 0.0))
+			q["tannarx"] = t
+			q["marja"] = flt(q["summa"]) - t
+		return qatorlar
+
+	qatorlar = od._cached(kesh_ctx, "bd:reyting-qatorlar", qurish)
+
+	katak = [q for q in qatorlar if (q.get("abc") or "") + (q.get("xyz") or "") == sinf]
+	katak.sort(key=lambda q: flt(q.get("summa")), reverse=True)
+
+	return {
+		"permitted": True,
+		"currency": ctx.company_currency,
+		"sinf": sinf,
+		"yil": yil,
+		"oylar": list(oylar),
+		"soni": len(katak),
+		"savdo": sum(flt(q.get("summa")) for q in katak),
+		"tannarx": sum(flt(q.get("tannarx")) for q in katak),
+		"marja": sum(flt(q.get("marja")) for q in katak),
+		"rows": [
+			{
+				"customer": q.get("kalit"),
+				"name": q.get("name"),
+				"summa": flt(q.get("summa")),
+				"tannarx": flt(q.get("tannarx")),
+				"marja": flt(q.get("marja")),
+				"ulush": q.get("ulush"),
+			}
+			for q in katak
+		],
+	}
+
+
 #: Cross-sell tahlilida nechta "asosiy" tovar guruhi qaraladi.
 CROSS_GURUH = 10
 #: Bitta mijozga nechta guruh tavsiya qilinadi (zaxira ham shu qadar guruhdan).
@@ -1427,6 +1626,10 @@ def get_tahlil(filters=None):
 		params["oylar"] = tuple(oylar)
 	cc = _cc_sharti(ctx, params, "sii.cost_center")
 	wh = _wh_sharti(ctx, params, "sle.warehouse")
+	# SLE-tannarx uchun filial: sarlavhada emas, hujjat QATORIDA (izohi
+	# `_sle_cc` da). Savdo filialdan olinib tannarx butun kompaniyadan
+	# olinmasligi uchun HAR BIR tannarx-so'roviga qo'shiladi.
+	sle_join, sle_cc = _sle_cc(ctx, params)
 
 	SI_SCOPE = """FROM `tabSales Invoice` si
 			WHERE si.company = %(company)s AND si.docstatus = 1
@@ -1476,11 +1679,12 @@ def get_tahlil(filters=None):
 		for r in frappe.db.sql(
 			"""SELECT sle.item_code, SUM(-sle.stock_value_difference) AS t
 			   FROM `tabStock Ledger Entry` sle
-			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
+			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no{join}
 			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}
-			   GROUP BY sle.item_code""".format(oy=oy_sharti, wh=wh),
+			     AND YEAR(si.posting_date) = %(yil)s{oy}{scc}
+			   GROUP BY sle.item_code""".format(
+				oy=oy_sharti, wh=wh, join=sle_join, scc=sle_cc),
 			params, as_dict=True):
 			tannarx_t[r.item_code] = flt(r.t)
 
@@ -1504,31 +1708,16 @@ def get_tahlil(filters=None):
 				   JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
 				   WHERE si.company = %(company)s AND si.docstatus = 1
 				     AND YEAR(si.posting_date) = %(yil)s{oy}{cc}
-				   GROUP BY si.customer ORDER BY summa DESC LIMIT 100""".format(
+				   GROUP BY si.customer ORDER BY summa DESC""".format(
 					oy=oy_sharti, cc=cc), params, as_dict=True)
 		else:
 			savdo_m = frappe.db.sql(
 				"""SELECT si.customer, si.customer_name,
 				          SUM(si.base_grand_total) AS summa, COUNT(*) AS docs
-				""" + SI_SCOPE + " GROUP BY si.customer ORDER BY summa DESC LIMIT 100",
+				""" + SI_SCOPE + " GROUP BY si.customer ORDER BY summa DESC",
 				params, as_dict=True)
 
-		tannarx_m = {}
-		for r in frappe.db.sql(
-			"""SELECT si.customer, SUM(-sle.stock_value_difference) AS t
-			   FROM `tabStock Ledger Entry` sle
-			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
-			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
-			     AND si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}
-			   GROUP BY si.customer""".format(oy=oy_sharti, wh=wh),
-			params, as_dict=True):
-			tannarx_m[r.customer] = flt(r.t)
-
-		# Oyna sex oqimi: tannarx zakazga bog'langan Material Issue'da
-		mi_tannarx = _mi_tannarx(ctx, yil, oylar)
-		for mijoz_kaliti, qiymat in mi_tannarx.items():
-			tannarx_m[mijoz_kaliti] = tannarx_m.get(mijoz_kaliti, 0.0) + qiymat
+		tannarx_m, mi_tannarx = _mijoz_tannarx(ctx, yil, oylar)
 
 		mijozlar = []
 		for r in savdo_m:
@@ -1547,13 +1736,61 @@ def get_tahlil(filters=None):
 		tannarx = flt(frappe.db.sql(
 			"""SELECT SUM(-sle.stock_value_difference)
 			   FROM `tabStock Ledger Entry` sle
-			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
+			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no{join}
 			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s{oy}""".format(
-				oy=oy_sharti, wh=wh),
+			     AND YEAR(si.posting_date) = %(yil)s{oy}{scc}""".format(
+				oy=oy_sharti, wh=wh, join=sle_join, scc=sle_cc),
 			params)[0][0]) + sum(mi_tannarx.values())
 		marja = savdo - tannarx
+
+		# --- MIJOZ STATUSI (2x2) ---------------------------------------
+		# Chegaralar TO'LIQ qamrovdan olinadi (mijozlar-jadvali quyida
+		# top-100 ga kesiladi; o'rtachani kesilgandan keyin olsak, dumdagi
+		# mayda mijozlar hisobga kirmay chegara sun'iy ko'tarilib ketardi).
+		mijoz_soni = cint(bosh.mijozlar)
+		ort_savdo = savdo / mijoz_soni if mijoz_soni else 0.0
+		ort_pct = marja / savdo * 100 if savdo else None
+		yigindi = {k: {"kalit": k, "soni": 0, "savdo": 0.0, "marja": 0.0}
+		           for k in STATUS_TARTIB}
+		for m in mijozlar:
+			m["status"] = None if ort_pct is None else _mijoz_statusi(
+				m["summa"], m["tannarx"], m["marja_pct"], ort_savdo, ort_pct)
+			if m["status"]:
+				h = yigindi[m["status"]]
+				h["soni"] += 1
+				h["savdo"] += m["summa"]
+				h["marja"] += m["marja"]
+		mijoz_status = {
+			"ort_savdo": ort_savdo,
+			"ort_pct": None if ort_pct is None else round(ort_pct, 2),
+			"shubha_pct": None if ort_pct is None else round(
+				_shubha_chegara(ort_pct), 1),
+			"jami_savdo": savdo,
+			"jami_marja": marja,
+			"soni": sum(h["soni"] for h in yigindi.values()),
+			"yigindi": [yigindi[k] for k in STATUS_TARTIB],
+		}
+		# Jadval frontendda STATUS bo'yicha filtrlangani uchun har status
+		# o'z ro'yxatini to'liq olishi kerak: global top-100 da "Potensial"
+		# (ta'rifi bo'yicha mayda mijozlar) deyarli uchramaydi va filtr bo'sh
+		# chiqardi. Shuning uchun kesish HAR GURUH ichida qilinadi.
+		#
+		# `mijozlar` savdo bo'yicha kamayish tartibida bo'lgani uchun guruh
+		# ichidagi o'rin global o'rindan hech qachon past emas — demak global
+		# top-100 shu birlashmaga butunlay kiradi va "Hammasi" ko'rinishi
+		# o'zgarmaydi (birlashmaning birinchi 100 tasi aynan o'sha).
+		guruhlar = {}
+		tanlangan = []
+		for m in mijozlar:
+			if not m["status"]:
+				continue
+			g = guruhlar.setdefault(m["status"], 0)
+			if g >= MIJOZ_STATUS_LIMIT:
+				continue
+			guruhlar[m["status"]] = g + 1
+			tanlangan.append(m)
+		mijozlar = tanlangan
 
 		yillar = [cint(r[0]) for r in frappe.db.sql(
 			"""SELECT DISTINCT YEAR(posting_date) FROM `tabSales Invoice`
@@ -1609,13 +1846,15 @@ def get_tahlil(filters=None):
 			"""SELECT MONTH(si.posting_date) AS oy,
 			          SUM(-sle.stock_value_difference) AS t
 			   FROM `tabStock Ledger Entry` sle
-			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no
+			   JOIN `tabSales Invoice` si ON si.name = sle.voucher_no{join}
 			   WHERE sle.is_cancelled = 0 AND sle.voucher_type = 'Sales Invoice'{wh}
 			     AND si.company = %(company)s AND si.docstatus = 1
-			     AND YEAR(si.posting_date) = %(yil)s
-			   GROUP BY MONTH(si.posting_date)""".format(wh=wh),
+			     AND YEAR(si.posting_date) = %(yil)s{scc}
+			   GROUP BY MONTH(si.posting_date)""".format(
+				wh=wh, join=sle_join, scc=sle_cc),
 			{"company": ctx.company, "yil": yil,
-			 **({"wh": ctx.warehouse} if ctx.warehouse else {})}, as_dict=True):
+			 **({"wh": ctx.warehouse} if ctx.warehouse else {}),
+			 **({"cc_list": params["cc_list"]} if sle_cc else {})}, as_dict=True):
 			if r.oy:
 				tannarx_oy[cint(r.oy)] = flt(r.t)
 
@@ -1656,15 +1895,20 @@ def get_tahlil(filters=None):
 				vozvrat_oylik[cint(r.oy)] = {
 					"oy": cint(r.oy), "dona": flt(r.dona), "summa": flt(r.summa)}
 
-		# Balans detallari (bugungi holat): naqd / plastik / mijoz balans / ombor.
-		# Kassa-schyotlar Umumiy paneldagi Kassa kartasi bilan BIR manbadan
-		# (Mode of Payment Account), shunda naqd+plastik = o'sha karta aynan.
+		# Balans detallari (bugungi holat): naqd / plastik / bank / mijoz
+		# balans / ombor. Kassa-schyotlar Umumiy paneldagi Kassa kartasi bilan
+		# BIR manbadan (Mode of Payment Account), shunda uchala qator yig'indisi
+		# o'sha kartalar bilan aynan tushadi.
 		bugun = str(getdate())
 		kassa_sch = od.get_cash_accounts(ctx.company)
-		naqd = od._gl_balance(
-			ctx, [a.name for a in kassa_sch if a.get("kind") != "bank"], bugun)
-		bank = od._gl_balance(
-			ctx, [a.name for a in kassa_sch if a.get("kind") == "bank"], bugun)
+
+		def kassa_qoldiq(kind):
+			return od._gl_balance(
+				ctx, [a.name for a in kassa_sch if a.get("kind") == kind], bugun)
+
+		naqd = kassa_qoldiq("cash")
+		plastik = kassa_qoldiq("plastik")
+		bank = kassa_qoldiq("bank")
 		mijoz_bal = od._gl_balance(ctx, od.get_receivable_accounts(ctx.company), bugun)
 		kreditor = od._gl_balance(ctx, od.get_payable_accounts(ctx.company), bugun)
 		ombor = od._stock_totals(frappe._dict(dict(ctx)), bugun)
@@ -1754,6 +1998,7 @@ def get_tahlil(filters=None):
 			"vozvrat_oylik": [vozvrat_oylik[m] for m in range(1, 13)],
 			"balans": {
 				"naqd": od._money_out(naqd),
+				"plastik": od._money_out(plastik),
 				"bank": od._money_out(bank),
 				# Qatorlar JAMI bilan bir xil konvensiyada — XOM GL belgisi
 				# bilan beriladi, shunda qatorlarni qo'shsa aynan "UMUMIY
@@ -1789,6 +2034,7 @@ def get_tahlil(filters=None):
 			},
 			"tovarlar": tovarlar,
 			"mijozlar": mijozlar,
+			"mijoz_status": mijoz_status,
 			"mijoz_reyting": mijoz_reyting,
 			"cross_sell": _cross_sell(ctx, yil, oylar, mijoz_qatorlar),
 		}
