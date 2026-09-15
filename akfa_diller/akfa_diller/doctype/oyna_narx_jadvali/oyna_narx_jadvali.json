@@ -1,0 +1,535 @@
+{
+ "actions": [],
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sec_intro",
+  "intro_izoh",
+  "sec_n_oyna",
+  "n_oyna_izoh",
+  "narx_oyna",
+  "sec_n_qirra",
+  "n_qirra_izoh",
+  "narx_qirra",
+  "sec_n_burchak",
+  "narx_burchak",
+  "sec_n_teshik",
+  "n_teshik_izoh",
+  "narx_teshik",
+  "sec_n_kesim",
+  "narx_kesim",
+  "sec_n_ishlov",
+  "n_ishlov_izoh",
+  "narx_ishlov",
+  "sec_chiqindi",
+  "chiqindi_izoh",
+  "chiqindi",
+  "sec_raskroy",
+  "raskroy_izoh",
+  "raskroy_list_eni_mm",
+  "raskroy_list_boyi_mm",
+  "raskroy_chetlash_mm",
+  "raskroy_kerf_mm",
+  "raskroy_min_polosa_mm",
+  "raskroy_shakl_zaxira_mm",
+  "cb_rk1",
+  "raskroy_min_qoldiq_mm",
+  "raskroy_min_qoldiq_m2",
+  "raskroy_qoldiq_max_soni",
+  "raskroy_chiqindi_min_foiz",
+  "raskroy_chiqindi_max_foiz",
+  "raskroy_burish",
+  "sec_turlar",
+  "turlar_izoh",
+  "ishlov_turlari",
+  "sec_konst",
+  "yaxlitlash_mm",
+  "min_maydon_m2",
+  "min_olcham_mm",
+  "max_olcham_mm",
+  "ogirlik_koef",
+  "standart_rejimi",
+  "cb_k1",
+  "zakalka_min_kichik_mm",
+  "zakalka_min_katta_mm",
+  "zakalka_max_katta_mm",
+  "zakalka_max_kichik_mm",
+  "zakalka_min_qalinlik_mm",
+  "zakalka_max_qalinlik_mm",
+  "sec_item",
+  "item_izoh",
+  "item_oyna",
+  "item_qirra",
+  "item_burchak",
+  "item_teshik",
+  "cb_s1",
+  "item_kesim",
+  "item_matofka",
+  "item_zakalka",
+  "item_aksessuar",
+  "item_markirovka",
+  "item_reska",
+  "item_boyash",
+  "item_paket",
+  "cb_s2",
+  "valyuta",
+  "aksessuar_narx_royxati",
+  "ombor"
+ ],
+ "fields": [
+  {
+   "fieldname": "sec_intro",
+   "fieldtype": "Section Break",
+   "label": "Narxlar"
+  },
+  {
+   "fieldname": "intro_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'><b>Narxlar shu yerda.</b> Qatorning «Narx» ustunini o'zgartirib saqlang — yangi zakazlar darhol yangi narx bilan hisoblanadi (tasdiqlangan eskilari o'zgarmaydi). «Qalinlik gacha» pog'onali: 4 → ≤4 mm, 6 → 5–6 mm, 10 → 7–10 mm; yangi 8 mm oyna chiqsa 10 mm narxi o'zi topiladi, 12 mm uchun esa qator qo'shasiz (yoki 0 = zaxira qator). Izohda «TAXMINIY» — tasdiqlanmagan narx.</div>"
+  },
+  {
+   "fieldname": "sec_n_oyna",
+   "fieldtype": "Section Break",
+   "label": "Oyna narxlari (so'm / m²)"
+  },
+  {
+   "fieldname": "n_oyna_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>Har oyna turi (Item) uchun 1 m² narxi. Yangi oyna turi (8 mm bronza, ko'zgu, lakobel…) — avval Item'da «Oynalar» guruhida oching (qalinlik, rang, oyna turi bilan), keyin shu yerga qator qo'shing.</div>"
+  },
+  {
+   "fieldname": "narx_oyna",
+   "fieldtype": "Table",
+   "label": "Oyna narxlari",
+   "options": "Oyna Narx Oyna"
+  },
+  {
+   "fieldname": "sec_n_qirra",
+   "fieldtype": "Section Break",
+   "label": "Qirra ishlovi narxlari (so'm / pog.m)"
+  },
+  {
+   "fieldname": "n_qirra_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>Tomon uzunligi (m) × narx. Faska uchun «Kenglik gacha»: 10 → 0–10 mm, 20 → 10–20 mm.</div>"
+  },
+  {
+   "fieldname": "narx_qirra",
+   "fieldtype": "Table",
+   "label": "Qirra narxlari",
+   "options": "Oyna Narx Qirra"
+  },
+  {
+   "fieldname": "sec_n_burchak",
+   "fieldtype": "Section Break",
+   "label": "Burchak ishlovi narxlari (so'm / burchak)"
+  },
+  {
+   "fieldname": "narx_burchak",
+   "fieldtype": "Table",
+   "label": "Burchak narxlari",
+   "options": "Oyna Narx Burchak"
+  },
+  {
+   "fieldname": "sec_n_teshik",
+   "fieldtype": "Section Break",
+   "label": "Teshik narxlari (so'm / teshik)"
+  },
+  {
+   "fieldname": "n_teshik_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>«Ø gacha»: 20 → Ø ≤ 20 mm; 50 → 20–50 mm; 200 → 50–200 mm.</div>"
+  },
+  {
+   "fieldname": "narx_teshik",
+   "fieldtype": "Table",
+   "label": "Teshik narxlari",
+   "options": "Oyna Narx Teshik"
+  },
+  {
+   "fieldname": "sec_n_kesim",
+   "fieldtype": "Section Break",
+   "label": "Kesim narxlari (so'm / dona)"
+  },
+  {
+   "fieldname": "narx_kesim",
+   "fieldtype": "Table",
+   "label": "Kesim narxlari",
+   "options": "Oyna Narx Kesim"
+  },
+  {
+   "fieldname": "sec_n_ishlov",
+   "fieldtype": "Section Break",
+   "label": "Matofka, zakalka, markirovka narxlari"
+  },
+  {
+   "fieldname": "n_ishlov_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>Matofka va zakalka — so'm / m²; markirovka (logo/yozuv) — so'm / dona.</div>"
+  },
+  {
+   "fieldname": "narx_ishlov",
+   "fieldtype": "Table",
+   "label": "Ishlov narxlari",
+   "options": "Oyna Narx Ishlov"
+  },
+  {
+   "fieldname": "sec_chiqindi",
+   "fieldtype": "Section Break",
+   "label": "Chiqindi (materialga qo'shiladigan foiz)"
+  },
+  {
+   "fieldname": "chiqindi_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>Sarf = hisob-m² × (1 + foiz). Qalinlik bo'yicha; 0 = ro'yxatda yo'q qalinliklar uchun zaxira.</div>"
+  },
+  {
+   "fieldname": "chiqindi",
+   "fieldtype": "Table",
+   "label": "Chiqindi qalinlik bo'yicha",
+   "options": "Oyna Chiqindi Qatori"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_raskroy",
+   "fieldtype": "Section Break",
+   "label": "Raskroy (listdan kesish) sozlamalari"
+  },
+  {
+   "fieldname": "raskroy_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 6px'>Raskroy = pozitsiyalarni ombordagi <b>list</b> (varaq) ustiga joylashtirib kesish rejasi. Bu yerda faqat qoidalar: yangi zakazga tushadigan <b>list o'lchami</b>, chekka-qirqim, <b>qoldiq</b> (saqlanadigan bo'lak) mezoni va mijozga qo'shiladigan <b>chiqindi %</b> chegaralari. List o'lchami har zakazda alohida yoziladi.</div>"
+  },
+  {
+   "default": "3600",
+   "description": "Yangi zakazda listlar jadvaliga tushadigan o'lcham (oxirgi zakazdagi o'lcham bo'lsa, o'sha olinadi)",
+   "fieldname": "raskroy_list_eni_mm",
+   "fieldtype": "Int",
+   "label": "List eni — default (mm)"
+  },
+  {
+   "default": "2600",
+   "fieldname": "raskroy_list_boyi_mm",
+   "fieldtype": "Int",
+   "label": "List bo'yi — default (mm)"
+  },
+  {
+   "default": "10",
+   "description": "List chetidan tashlab yuboriladigan polosa",
+   "fieldname": "raskroy_chetlash_mm",
+   "fieldtype": "Int",
+   "label": "Chekka-qirqim (mm, har tomondan)"
+  },
+  {
+   "default": "0",
+   "description": "Oyna sindirib kesiladi — odatda 0",
+   "fieldname": "raskroy_kerf_mm",
+   "fieldtype": "Int",
+   "label": "Kesim eni / kerf (mm)"
+  },
+  {
+   "default": "40",
+   "description": "Bundan tor bo'sh polosa chiqindi hisoblanadi",
+   "fieldname": "raskroy_min_polosa_mm",
+   "fieldtype": "Int",
+   "label": "Eng tor foydali polosa (mm)"
+  },
+  {
+   "default": "0",
+   "description": "Doira va erkin shakl to'rtburchak bo'lak sifatida kesiladi; shu zaxira qo'shiladi",
+   "fieldname": "raskroy_shakl_zaxira_mm",
+   "fieldtype": "Int",
+   "label": "Doira / erkin shakl zaxirasi (mm)"
+  },
+  {
+   "fieldname": "cb_rk1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "300",
+   "description": "Bo'sh bo'lak shu tomondan katta bo'lsa — saqlanadigan QOLDIQ, aks holda chiqindi",
+   "fieldname": "raskroy_min_qoldiq_mm",
+   "fieldtype": "Int",
+   "label": "Qoldiq: eng kichik tomon (mm)"
+  },
+  {
+   "default": "0.25",
+   "fieldname": "raskroy_min_qoldiq_m2",
+   "fieldtype": "Float",
+   "label": "Qoldiq: eng kichik maydon (m²)"
+  },
+  {
+   "default": "2",
+   "fieldname": "raskroy_qoldiq_max_soni",
+   "fieldtype": "Int",
+   "label": "Har listda eng ko'pi bilan nechta qoldiq"
+  },
+  {
+   "default": "0",
+   "description": "Haqiqiy chiqindi bundan kam bo'lsa ham shu % yoziladi (0 = cheklov yo'q)",
+   "fieldname": "raskroy_chiqindi_min_foiz",
+   "fieldtype": "Float",
+   "label": "Mijozga list-sarfi — eng kam % (listga nisbatan)"
+  },
+  {
+   "default": "100",
+   "description": "Avtomatik foiz shundan oshmaydi (100 = cheklov yo'q); qo'lda yozilgan foizga ta'sir qilmaydi",
+   "fieldname": "raskroy_chiqindi_max_foiz",
+   "fieldtype": "Float",
+   "label": "Mijozga list-sarfi — eng ko'p % (avto)"
+  },
+  {
+   "default": "1",
+   "description": "«Naqshli» oyna hech qachon burilmaydi",
+   "fieldname": "raskroy_burish",
+   "fieldtype": "Check",
+   "label": "Bo'lakni 90° burishga ruxsat (oddiy oyna)"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_turlar",
+   "fieldtype": "Section Break",
+   "label": "Ishlov turlari — yangi qirra / burchak / kesim turi qo'shish"
+  },
+  {
+   "fieldname": "turlar_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>Pozitsiya oynasidagi «Qirra», «Burchak», «Kesim» tanlovlari shu ro'yxatdan. Yangi tur: qator qo'shing → saqlang → tanlovda paydo bo'ladi → yuqoridagi narx-jadvaliga shu nom bilan narx yozing. Kesim uchun «Odatiy eni/bo'yi» — tur tanlanganda tushadigan o'lcham.</div>"
+  },
+  {
+   "fieldname": "ishlov_turlari",
+   "fieldtype": "Table",
+   "label": "Ishlov turlari",
+   "options": "Oyna Ishlov Turi"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_konst",
+   "fieldtype": "Section Break",
+   "label": "Hisob-qoidalari (bir marta sozlanadi)"
+  },
+  {
+   "default": "10",
+   "fieldname": "yaxlitlash_mm",
+   "fieldtype": "Int",
+   "label": "O'lcham yaxlitlash (mm, yuqoriga)"
+  },
+  {
+   "default": "0.25",
+   "fieldname": "min_maydon_m2",
+   "fieldtype": "Float",
+   "label": "Minimal hisob maydoni (m²)",
+   "precision": "3"
+  },
+  {
+   "default": "50",
+   "fieldname": "min_olcham_mm",
+   "fieldtype": "Int",
+   "label": "Minimal o'lcham (mm)"
+  },
+  {
+   "default": "6000",
+   "fieldname": "max_olcham_mm",
+   "fieldtype": "Int",
+   "label": "Maksimal o'lcham (mm)"
+  },
+  {
+   "default": "2.5",
+   "fieldname": "ogirlik_koef",
+   "fieldtype": "Float",
+   "label": "Og'irlik koeffitsienti (kg / m² / mm)",
+   "precision": "2"
+  },
+  {
+   "default": "Xato",
+   "fieldname": "standart_rejimi",
+   "fieldtype": "Select",
+   "label": "Standart tekshiruv (yangi zakazlar uchun)",
+   "options": "Xato\nOgohlantirish"
+  },
+  {
+   "fieldname": "cb_k1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "200",
+   "fieldname": "zakalka_min_kichik_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: min kichik tomon (mm)"
+  },
+  {
+   "default": "300",
+   "fieldname": "zakalka_min_katta_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: min katta tomon (mm)"
+  },
+  {
+   "default": "3000",
+   "fieldname": "zakalka_max_katta_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: max katta tomon (mm)"
+  },
+  {
+   "default": "2000",
+   "fieldname": "zakalka_max_kichik_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: max kichik tomon (mm)"
+  },
+  {
+   "default": "4",
+   "fieldname": "zakalka_min_qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: min qalinlik (mm)"
+  },
+  {
+   "default": "19",
+   "fieldname": "zakalka_max_qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Zakalka: max qalinlik (mm)"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_item",
+   "fieldtype": "Section Break",
+   "label": "Buxgalteriya sozlamalari (faktura-itemlar, valyuta, ombor) — tegilmaydi"
+  },
+  {
+   "fieldname": "item_izoh",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted' style='margin:-4px 0 8px'>«Mijozga topshirildi»da faktura yoziladi; har kategoriya fakturada shu Item nomi bilan chiqadi. Bir marta sozlangan.</div>"
+  },
+  {
+   "fieldname": "item_oyna",
+   "fieldtype": "Link",
+   "label": "Oyna (kesish) itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_qirra",
+   "fieldtype": "Link",
+   "label": "Qirra ishlovi itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_burchak",
+   "fieldtype": "Link",
+   "label": "Burchak ishlovi itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_teshik",
+   "fieldtype": "Link",
+   "label": "Teshik ochish itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "cb_s1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "item_kesim",
+   "fieldtype": "Link",
+   "label": "Kesim (fortochka) itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_matofka",
+   "fieldtype": "Link",
+   "label": "Matofka itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_zakalka",
+   "fieldtype": "Link",
+   "label": "Zakalka itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_aksessuar",
+   "fieldtype": "Link",
+   "label": "Aksessuarlar (xizmat) itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_markirovka",
+   "fieldtype": "Link",
+   "label": "Markirovka itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_reska",
+   "fieldtype": "Link",
+   "label": "Reska (kesish) itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_boyash",
+   "fieldtype": "Link",
+   "label": "Oyna bo'yash itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_paket",
+   "fieldtype": "Link",
+   "label": "Paket yig'ish itemi",
+   "options": "Item"
+  },
+  {
+   "fieldname": "cb_s2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "UZS",
+   "fieldname": "valyuta",
+   "fieldtype": "Link",
+   "label": "Valyuta",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "aksessuar_narx_royxati",
+   "fieldtype": "Link",
+   "label": "Aksessuar narx ro'yxati",
+   "options": "Price List"
+  },
+  {
+   "fieldname": "ombor",
+   "fieldtype": "Link",
+   "label": "Material ombori",
+   "options": "Warehouse"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-12 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Narx Jadvali",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

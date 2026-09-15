@@ -1,0 +1,80 @@
+/* Oyna Zakaz konfigurator — kartalar, dialog, preview (Frappe theme-o'zgaruvchilarida) */
+.oz-cards__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.oz-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+.oz-card { border: 1px solid var(--border-color); border-radius: var(--border-radius-md, 8px); background: var(--card-bg); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.oz-card__svg { background: #fff; border-radius: 6px; overflow: hidden; min-height: 120px; border: 1px solid var(--border-color); }
+.oz-card__svg svg { display: block; width: 100%; height: auto; }
+.oz-skeleton { height: 200px; background: linear-gradient(90deg, var(--bg-light-gray) 25%, var(--control-bg) 50%, var(--bg-light-gray) 75%); background-size: 200% 100%; animation: oz-sk 1.2s infinite; }
+@keyframes oz-sk { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.oz-card__cap { font-size: var(--text-sm); color: var(--text-color); }
+.oz-card__chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 18px; }
+.oz-card__foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+.oz-card__sum { font-weight: 600; font-variant-numeric: tabular-nums; }
+.oz-card__btns { display: flex; gap: 4px; }
+.oz-danger { color: var(--red-600); }
+.oz-empty { border: 1px dashed var(--border-color); border-radius: 8px; padding: 26px; text-align: center; color: var(--text-muted); }
+.oz-chip { display: inline-block; font-size: var(--text-xs); padding: 2px 8px; border-radius: 999px; background: var(--bg-light-gray); color: var(--text-color); font-variant-numeric: tabular-nums; }
+.oz-chip--sm { padding: 1px 6px; }
+.oz-chip--muted { color: var(--text-muted); }
+.oz-tax { color: var(--orange-600, #d97706); font-weight: 600; font-size: var(--text-xs); }
+.oz-hint { font-size: var(--text-sm); color: var(--text-muted); margin-bottom: 8px; }
+
+/* dialog: ikki ustun */
+.oz-dialog .modal-body { display: flex; gap: 16px; align-items: flex-start; }
+.oz-dialog .modal-body > :not(.oz-preview) { flex: 1 1 56%; min-width: 0; } /* Frappe 15: .form-layout o'rash-div ichida */
+.oz-dialog .oz-preview { flex: 0 0 42%; position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+.oz-preview__svg { background: #fff; border: 1px solid var(--border-color); border-radius: 8px; min-height: 200px; position: relative; }
+.oz-preview__svg svg { display: block; width: 100%; height: auto; }
+.oz-preview__empty { padding: 60px 0; text-align: center; }
+.oz-preview--busy .oz-preview__svg { opacity: .6; }
+.oz-preview__hisob { display: flex; flex-wrap: wrap; gap: 4px; }
+.oz-alert { font-size: var(--text-sm); padding: 5px 8px; border-radius: 6px; margin-bottom: 4px; }
+.oz-alert--xato { background: var(--red-50, #fef2f2); color: var(--red-700, #b91c1c); border: 1px solid var(--red-200, #fecaca); }
+.oz-alert--ogoh { background: var(--orange-50, #fff7ed); color: var(--orange-700, #c2410c); border: 1px solid var(--orange-200, #fed7aa); }
+.oz-narx-tbl { width: 100%; font-size: var(--text-sm); border-collapse: collapse; }
+.oz-narx-tbl td { padding: 3px 4px; border-bottom: 1px solid var(--border-color); vertical-align: top; }
+.oz-narx-tbl td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oz-narx-tbl tr.t td { font-weight: 600; border-bottom: none; border-top: 2px solid var(--text-color); }
+@media (max-width: 992px) { .oz-dialog .modal-body { flex-direction: column; } .oz-dialog .oz-preview { position: static; flex-basis: auto; width: 100%; } }
+
+/* 2026-09-04 (user): dialog yozuvlari mayda — kattalashtirildi; joy ko'p bo'lsa ham, skroll bilan */
+.oz-dialog .modal-body { font-size: 15px; }
+.oz-dialog .modal-body > :not(.oz-preview) { flex: 1 1 60%; }
+.oz-dialog .oz-preview { flex: 0 0 38%; }
+.oz-dialog .modal-title { font-size: 20px; font-weight: 600; }
+.oz-dialog .section-head { font-size: 17px; font-weight: 700; margin-top: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); }
+.oz-dialog .control-label { font-size: 14px; font-weight: 600; color: var(--text-color); margin-bottom: 4px; }
+.oz-dialog .frappe-control { margin-bottom: 12px; }
+.oz-dialog .form-control, .oz-dialog select.form-control, .oz-dialog .input-with-feedback { font-size: 15px; height: 38px; }
+.oz-dialog textarea.form-control { height: auto; }
+.oz-dialog .checkbox .label-area { font-size: 15px; }
+.oz-dialog .help-box, .oz-dialog .oz-hint { font-size: 13px; }
+.oz-dialog .btn { font-size: 14px; padding: 6px 12px; }
+.oz-dialog .grid-heading-row .grid-static-col, .oz-dialog .grid-body .grid-static-col, .oz-dialog .grid-body input { font-size: 14px; }
+.oz-dialog .grid-body .grid-row { min-height: 36px; }
+.oz-dialog .oz-preview__hisob, .oz-dialog .oz-preview__narx, .oz-dialog .oz-preview__xato { font-size: 14px; }
+.oz-dialog .oz-narx-tbl td { padding: 4px 6px; }
+
+/* raskroy — list xaritalari */
+.oz-rk__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.oz-pill { display: inline-block; font-size: var(--text-xs); font-weight: 600; padding: 2px 10px; border-radius: 999px; border: 1px solid transparent; }
+.oz-pill--yoq { background: var(--bg-light-gray); color: var(--text-muted); }
+.oz-pill--dolzarb { background: var(--green-50, #ecfdf5); color: var(--green-700, #047857); border-color: var(--green-200, #a7f3d0); }
+.oz-pill--eskirgan { background: var(--orange-50, #fff7ed); color: var(--orange-700, #c2410c); border-color: var(--orange-200, #fed7aa); }
+.oz-list-cards { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 780px; }
+.oz-list-card { border: 1px solid var(--border-color); border-radius: var(--border-radius-md, 8px); background: var(--card-bg); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.oz-list-card__svg { background: #fff; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color); min-height: 120px; }
+.oz-list-card__svg svg { display: block; width: 100%; height: auto; }
+.oz-list-card__cap { font-size: var(--text-sm); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.oz-list-card__qoldiq { font-size: var(--text-xs); color: var(--text-muted); }
+.oz-chiqindi-note { font-size: var(--text-sm); padding: 6px 10px; border-radius: 6px; background: var(--bg-light-gray); margin-top: 4px; }
+.oz-chiqindi-note--eskirgan { background: var(--orange-50, #fff7ed); color: var(--orange-700, #c2410c); }
+.oz-chiqindi-note--yoq { color: var(--text-muted); }
+.oz-rk__xato { font-size: var(--text-sm); color: var(--red-700, #b91c1c); }
+
+.oz-rk-tbl { width: 100%; max-width: 780px; border-collapse: collapse; font-size: var(--text-sm); margin-bottom: 6px; }
+.oz-rk-tbl td { padding: 4px 6px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+.oz-rk-tbl td:nth-child(2) { width: 180px; white-space: nowrap; font-size: 0; line-height: 0; }
+.oz-rk-seg { display: inline-block; height: 12px; }
+.oz-rk-seg--b { background: #93c5fd; } .oz-rk-seg--c { background: #f87171; } .oz-rk-seg--q { background: #a3e635; }
+.oz-rk-mijoz { white-space: nowrap; }

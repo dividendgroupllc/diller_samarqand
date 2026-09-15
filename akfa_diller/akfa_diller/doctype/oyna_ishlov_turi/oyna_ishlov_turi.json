@@ -1,0 +1,96 @@
+{
+ "actions": [],
+ "creation": "2026-09-04 03:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "guruh",
+  "nom",
+  "chizma",
+  "kenglik_kerak",
+  "min_qalinlik_mm",
+  "eni_mm",
+  "boyi_mm",
+  "tavsif"
+ ],
+ "fields": [
+  {
+   "fieldname": "guruh",
+   "fieldtype": "Select",
+   "label": "Guruh",
+   "in_list_view": 1,
+   "options": "Qirra\nBurchak\nKesim",
+   "reqd": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "nom",
+   "fieldtype": "Data",
+   "label": "Nomi",
+   "in_list_view": 1,
+   "reqd": 1,
+   "columns": 2,
+   "description": "Tanlov-ro'yxatda va tarif-jadvalida shu nom ishlatiladi"
+  },
+  {
+   "fieldname": "chizma",
+   "fieldtype": "Select",
+   "label": "Chizmada ko'rinishi",
+   "in_list_view": 1,
+   "options": "Ingichka chiziq\nO'rta chiziq\nQalin chiziq\nQalin + ichki chiziq\nPunktir ichki chiziq\nYoy (radius)\nTo'g'ri kesik",
+   "columns": 2,
+   "description": "Qirra: chiziq uslubi · Burchak: yoy yoki kesik · Kesim uchun kerak emas"
+  },
+  {
+   "fieldname": "kenglik_kerak",
+   "fieldtype": "Check",
+   "label": "Kenglik kiritiladi (faska)",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Belgilansa pozitsiyada «Faska kengligi (mm)» majburiy, narx kenglik bo'yicha"
+  },
+  {
+   "fieldname": "min_qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Min qalinlik (mm)",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Faqat shundan qalin oynada ruxsat (0 = cheklov yo'q)"
+  },
+  {
+   "fieldname": "eni_mm",
+   "fieldtype": "Int",
+   "label": "Odatiy eni (mm)",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Kesim uchun: tur tanlanganda tushadigan odatiy o'lcham"
+  },
+  {
+   "fieldname": "boyi_mm",
+   "fieldtype": "Int",
+   "label": "Odatiy bo'yi (mm)",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "tavsif",
+   "fieldtype": "Data",
+   "label": "Tavsif",
+   "in_list_view": 1,
+   "columns": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-05 08:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Ishlov Turi",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

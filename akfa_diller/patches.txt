@@ -14,3 +14,6 @@ akfa_diller.patches.oyna_sex_manager_company_permission
 akfa_diller.patches.seed_company_group_setup
 akfa_diller.patches.v0_0.add_report_service_custom_fields
 akfa_diller.patches.v0_0.add_report_service_client_cid_unique
+akfa_diller.patches.oyna_konfigurator_setup
+akfa_diller.patches.oyna_raskroy_reja_resave
+akfa_diller.patches.oyna_sex_narxlar_2026_09

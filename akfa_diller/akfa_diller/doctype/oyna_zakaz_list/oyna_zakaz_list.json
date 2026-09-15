@@ -1,0 +1,189 @@
+{
+ "actions": [],
+ "creation": "2026-09-05 01:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "oyna_item",
+  "qalinlik_mm",
+  "list_eni_mm",
+  "list_boyi_mm",
+  "list_soni",
+  "list_m2",
+  "bolaklar_foiz",
+  "chiqindi_foiz",
+  "qoldiq_foiz",
+  "mijoz_foiz",
+  "mijoz_foiz_qolda",
+  "qoldiq_mijozga",
+  "mijoz_jami_foiz",
+  "mijoz_foiz_avto",
+  "mijoz_m2",
+  "mijoz_summa",
+  "izoh"
+ ],
+ "fields": [
+  {
+   "fieldname": "oyna_item",
+   "fieldtype": "Link",
+   "label": "Oyna",
+   "options": "Item",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Pozitsiyalardagi oyna-item; har oyna uchun bitta qator (tizim o'zi qo'shadi)",
+   "search_index": 1
+  },
+  {
+   "fieldname": "qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Qalinlik (mm)",
+   "fetch_from": "oyna_item.custom_oyna_qalinlik_mm",
+   "read_only": 1,
+   "in_list_view": 0,
+   "columns": 1
+  },
+  {
+   "fieldname": "list_eni_mm",
+   "fieldtype": "Int",
+   "label": "List eni",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Ombordagi list (varaq) eni, mm. Masalan 3600"
+  },
+  {
+   "fieldname": "list_boyi_mm",
+   "fieldtype": "Int",
+   "label": "List bo'yi",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Ombordagi list bo'yi, mm. Masalan 2600"
+  },
+  {
+   "fieldname": "list_soni",
+   "fieldtype": "Int",
+   "label": "List soni",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Raskroy tuzilgach: shu oynadan nechta list kerak"
+  },
+  {
+   "fieldname": "list_m2",
+   "fieldtype": "Float",
+   "label": "Listlar maydoni (m²)",
+   "read_only": 1,
+   "precision": "2",
+   "description": "List soni × list maydoni",
+   "in_list_view": 0,
+   "columns": 1
+  },
+  {
+   "fieldname": "bolaklar_foiz",
+   "fieldtype": "Percent",
+   "label": "Bo'laklar %",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Zakaz bo'laklari listning necha foizini egallaydi"
+  },
+  {
+   "fieldname": "chiqindi_foiz",
+   "fieldtype": "Percent",
+   "label": "Chiqindi %",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Mayda, yaroqsiz qism — mijozga avtomatik yoziladi"
+  },
+  {
+   "fieldname": "qoldiq_foiz",
+   "fieldtype": "Percent",
+   "label": "Qoldiq %",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Katta, keyin ishlatsa bo'ladigan qism — omborda qoladi, mijozga yozilmaydi (agar siz yozmasangiz)"
+  },
+  {
+   "fieldname": "mijoz_foiz",
+   "fieldtype": "Percent",
+   "label": "Mijozga qo'shimcha % (jami)",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Shu oynaning barcha listlari bo'yicha jamlanma. Har list uchun alohida foiz «Listlar rejasi» jadvalida yoziladi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "mijoz_foiz_qolda",
+   "fieldtype": "Check",
+   "label": "Qo'lda",
+   "in_list_view": 0,
+   "columns": 1,
+   "description": "Belgilangan — siz yozgan foiz saqlanadi; olib tashlansa saqlashda avtomatik foizga qaytadi",
+   "hidden": 1
+  },
+  {
+   "fieldname": "qoldiq_mijozga",
+   "fieldtype": "Check",
+   "label": "Qoldiq mijozga beriladi",
+   "description": "Mijoz qoldiqni ham olib ketadi: mijozga % o'zi maksimumga (chiqindi + qoldiq) tushadi, ombordan butun list chiqadi, talonda ustaga eslatma",
+   "hidden": 1,
+   "in_list_view": 0
+  },
+  {
+   "fieldname": "mijoz_jami_foiz",
+   "fieldtype": "Percent",
+   "label": "Mijoz jami %",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Mijoz listning necha foizini to'laydi: bo'laklar (oyna narxi) + mijozga yoziladigan %"
+  },
+  {
+   "fieldname": "mijoz_foiz_avto",
+   "fieldtype": "Percent",
+   "label": "Avto %",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "mijoz_m2",
+   "fieldtype": "Float",
+   "label": "Mijozga yozilgan (m²)",
+   "read_only": 1,
+   "precision": "4"
+  },
+  {
+   "fieldname": "mijoz_summa",
+   "fieldtype": "Currency",
+   "label": "Mijozga yozilgan summa",
+   "options": "valyuta",
+   "read_only": 1,
+   "in_list_view": 0,
+   "columns": 2
+  },
+  {
+   "fieldname": "izoh",
+   "fieldtype": "Data",
+   "label": "Izoh",
+   "in_list_view": 0,
+   "columns": 2
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-05 08:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Zakaz List",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

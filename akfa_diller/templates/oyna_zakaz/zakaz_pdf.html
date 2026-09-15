@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<title>{{ doc.name }} — {{ title }}</title>
+<style>
+@page { size: A4 portrait; margin: 12mm 12mm 14mm 12mm;
+  @bottom-left { content: "Oyna sex · {{ doc.name }} · {{ title }}"; font-size: 7pt; color: #94a3b8; font-family: "DejaVu Sans"; }
+  @bottom-right { content: counter(page) " / " counter(pages); font-size: 7pt; color: #94a3b8; font-family: "DejaVu Sans"; } }
+html, body { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+{% include "akfa_diller/templates/oyna_zakaz/_zakaz_body.html" %}
+</body>
+</html>

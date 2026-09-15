@@ -1,0 +1,669 @@
+{
+ "actions": [],
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "sec_asosiy",
+  "nr",
+  "shakl",
+  "oyna_item",
+  "qalinlik_mm",
+  "rang",
+  "oyna_turi",
+  "mijoz_oynasi",
+  "cb_a1",
+  "eni_mm",
+  "boyi_mm",
+  "diametr_mm",
+  "perimetr_mm",
+  "chizma",
+  "olcham_matn",
+  "dona",
+  "korinish",
+  "izoh",
+  "sec_qirra",
+  "qirra_yuqori",
+  "qirra_ong",
+  "qirra_pastki",
+  "qirra_chap",
+  "qirra_kontur",
+  "faska_kengligi_mm",
+  "cb_q1",
+  "burchak_yc",
+  "burchak_yc_mm",
+  "burchak_yo",
+  "burchak_yo_mm",
+  "burchak_po",
+  "burchak_po_mm",
+  "burchak_pc",
+  "burchak_pc_mm",
+  "sec_ishlov",
+  "matofka_rejimi",
+  "matofka_maydoni_m2",
+  "matofka_x",
+  "matofka_y",
+  "matofka_w",
+  "matofka_h",
+  "cb_i1",
+  "zakalka",
+  "markirovka",
+  "markirovka_matn",
+  "boyash",
+  "paket",
+  "paket_oyna_item",
+  "paket_qalinlik_mm",
+  "ishlov_tartibi",
+  "tuzilma",
+  "sec_hisob",
+  "hisob_eni_mm",
+  "hisob_boyi_mm",
+  "haqiqiy_maydon_m2",
+  "hisob_maydon_m2",
+  "jami_maydon_m2",
+  "cb_h1",
+  "perimetr_m",
+  "ogirlik_kg",
+  "teshik_soni",
+  "kesim_soni",
+  "xulosa",
+  "tavsif",
+  "sec_narx",
+  "oyna_tarif",
+  "oyna_summa",
+  "chiqindi_foiz",
+  "chiqindi_summa",
+  "qirra_summa",
+  "burchak_summa",
+  "teshik_summa",
+  "cb_n1",
+  "kesim_summa",
+  "reska_summa",
+  "boyash_summa",
+  "paket_summa",
+  "matofka_summa",
+  "zakalka_summa",
+  "markirovka_summa",
+  "narx_qolda",
+  "narx_izoh",
+  "taxminiy",
+  "summa"
+ ],
+ "fields": [
+  {
+   "fieldname": "sec_asosiy",
+   "fieldtype": "Section Break",
+   "label": "Asosiy"
+  },
+  {
+   "columns": 1,
+   "description": "Avtomatik beriladi. Teshik/kesim/aksessuar qatorlari va chizma shu raqamga bog'lanadi (qator-raqamidan farqli — o'chirilganda o'zgarmaydi).",
+   "fieldname": "nr",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "№",
+   "read_only": 1
+  },
+  {
+   "default": "To'rtburchak",
+   "fieldname": "shakl",
+   "fieldtype": "Select",
+   "label": "Shakl",
+   "options": "To'rtburchak\nDoira\nErkin shakl",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "oyna_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Oyna",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "oyna_item.custom_oyna_qalinlik_mm",
+   "fetch_if_empty": 1,
+   "fieldname": "qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Qalinlik (mm)",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "oyna_item.custom_oyna_rang",
+   "fetch_if_empty": 1,
+   "fieldname": "rang",
+   "fieldtype": "Data",
+   "label": "Rang",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "oyna_item.custom_oyna_turi",
+   "fetch_if_empty": 1,
+   "fieldname": "oyna_turi",
+   "fieldtype": "Data",
+   "label": "Oyna turi",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Belgilansa oyna narxi va oyna-materiali hisoblanmaydi — faqat ishlovlar",
+   "fieldname": "mijoz_oynasi",
+   "fieldtype": "Check",
+   "label": "Mijozning o'z oynasi"
+  },
+  {
+   "fieldname": "cb_a1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "eni_mm",
+   "fieldtype": "Int",
+   "in_list_view": 0,
+   "label": "Eni (mm)"
+  },
+  {
+   "fieldname": "boyi_mm",
+   "fieldtype": "Int",
+   "label": "Bo'yi (mm)"
+  },
+  {
+   "depends_on": "eval:doc.shakl=='Doira'",
+   "fieldname": "diametr_mm",
+   "fieldtype": "Int",
+   "label": "Diametr (mm)"
+  },
+  {
+   "depends_on": "eval:doc.shakl=='Erkin shakl'",
+   "fieldname": "perimetr_mm",
+   "fieldtype": "Int",
+   "label": "Perimetr (mm)"
+  },
+  {
+   "depends_on": "eval:doc.shakl=='Erkin shakl'",
+   "fieldname": "chizma",
+   "fieldtype": "Attach",
+   "label": "Chizma / shablon"
+  },
+  {
+   "columns": 2,
+   "fieldname": "olcham_matn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "O'lcham",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "fieldname": "dona",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Dona",
+   "reqd": 1
+  },
+  {
+   "default": "Old tomondan",
+   "fieldname": "korinish",
+   "fieldtype": "Select",
+   "label": "Ko'rinish",
+   "options": "Old tomondan\nOrqa tomondan"
+  },
+  {
+   "fieldname": "izoh",
+   "fieldtype": "Small Text",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "sec_qirra",
+   "fieldtype": "Section Break",
+   "label": "Qirra ishlovi va burchaklar"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "qirra_yuqori",
+   "fieldtype": "Select",
+   "label": "Qirra — yuqori ①",
+   "options": "Yo'q\nPritupka\nShlifovka\nPolirovka\nFaska"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "qirra_ong",
+   "fieldtype": "Select",
+   "label": "Qirra — o'ng ②",
+   "options": "Yo'q\nPritupka\nShlifovka\nPolirovka\nFaska"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "qirra_pastki",
+   "fieldtype": "Select",
+   "label": "Qirra — pastki ③",
+   "options": "Yo'q\nPritupka\nShlifovka\nPolirovka\nFaska"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "qirra_chap",
+   "fieldtype": "Select",
+   "label": "Qirra — chap ④",
+   "options": "Yo'q\nPritupka\nShlifovka\nPolirovka\nFaska"
+  },
+  {
+   "default": "Yo'q",
+   "depends_on": "eval:doc.shakl!='To\\'rtburchak'",
+   "fieldname": "qirra_kontur",
+   "fieldtype": "Select",
+   "label": "Kontur qirrasi (doira/erkin)",
+   "options": "Yo'q\nPritupka\nShlifovka\nPolirovka\nFaska"
+  },
+  {
+   "fieldname": "faska_kengligi_mm",
+   "fieldtype": "Int",
+   "label": "Faska kengligi (mm)"
+  },
+  {
+   "fieldname": "cb_q1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "burchak_yc",
+   "fieldtype": "Select",
+   "label": "Burchak yuqori-chap",
+   "options": "Yo'q\nRadius\nKesik"
+  },
+  {
+   "fieldname": "burchak_yc_mm",
+   "fieldtype": "Int",
+   "label": "R / kesik (mm)"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "burchak_yo",
+   "fieldtype": "Select",
+   "label": "Burchak yuqori-o'ng",
+   "options": "Yo'q\nRadius\nKesik"
+  },
+  {
+   "fieldname": "burchak_yo_mm",
+   "fieldtype": "Int",
+   "label": "R / kesik (mm) "
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "burchak_po",
+   "fieldtype": "Select",
+   "label": "Burchak pastki-o'ng",
+   "options": "Yo'q\nRadius\nKesik"
+  },
+  {
+   "fieldname": "burchak_po_mm",
+   "fieldtype": "Int",
+   "label": "R / kesik (mm)  "
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "burchak_pc",
+   "fieldtype": "Select",
+   "label": "Burchak pastki-chap",
+   "options": "Yo'q\nRadius\nKesik"
+  },
+  {
+   "fieldname": "burchak_pc_mm",
+   "fieldtype": "Int",
+   "label": "R / kesik (mm)   "
+  },
+  {
+   "fieldname": "sec_ishlov",
+   "fieldtype": "Section Break",
+   "label": "Ishlovlar"
+  },
+  {
+   "default": "Yo'q",
+   "description": "To'liq (splashnoy) — butun oyna matoviy · Polosa — lenta yopishtirilgan joy shaffof qoladi · Gul/logo — chizilgan joy shaffof qoladi. Uchalasi ham butun oyna maydoniga hisoblanadi.",
+   "fieldname": "matofka_rejimi",
+   "fieldtype": "Select",
+   "label": "Matofka",
+   "options": "Yo'q\nTo'liq\nPolosa\nGul"
+  },
+  {
+   "description": "Eski «Qisman» rejimidan qolgan (ishlatilmaydi)",
+   "fieldname": "matofka_maydoni_m2",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Matofka maydoni (m²)",
+   "precision": "4"
+  },
+  {
+   "description": "Eski «Qisman» rejimidan qolgan (ishlatilmaydi)",
+   "fieldname": "matofka_x",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Matofka X (mm, chapdan)"
+  },
+  {
+   "description": "Eski «Qisman» rejimidan qolgan (ishlatilmaydi)",
+   "fieldname": "matofka_y",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Matofka Y (mm, pastdan)"
+  },
+  {
+   "description": "Eski «Qisman» rejimidan qolgan (ishlatilmaydi)",
+   "fieldname": "matofka_w",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Matofka eni (mm)"
+  },
+  {
+   "description": "Eski «Qisman» rejimidan qolgan (ishlatilmaydi)",
+   "fieldname": "matofka_h",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Matofka bo'yi (mm)"
+  },
+  {
+   "fieldname": "cb_i1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "zakalka",
+   "fieldtype": "Check",
+   "label": "Zakalka"
+  },
+  {
+   "default": "0",
+   "fieldname": "markirovka",
+   "fieldtype": "Check",
+   "label": "Markirovka / logo / yozuv"
+  },
+  {
+   "depends_on": "eval:doc.markirovka",
+   "fieldname": "markirovka_matn",
+   "fieldtype": "Data",
+   "label": "Markirovka matni (nima, qayerda, o'lchami)"
+  },
+  {
+   "default": "0",
+   "description": "Butun oyna maydoni bo'yaladi (so'm / m²)",
+   "fieldname": "boyash",
+   "fieldtype": "Check",
+   "label": "Oyna bo'yash"
+  },
+  {
+   "default": "0",
+   "description": "Ikki oyna paketga yig'iladi. Yig'ish haqi so'm/m²; ikkala oynaning o'z narxi alohida hisoblanadi",
+   "fieldname": "paket",
+   "fieldtype": "Check",
+   "label": "Paket (2 qavat oyna)"
+  },
+  {
+   "depends_on": "eval:doc.paket",
+   "description": "Paketning ikkinchi qavati — boshqa rang yoki qalinlik bo'lishi mumkin",
+   "fieldname": "paket_oyna_item",
+   "fieldtype": "Link",
+   "label": "2-oyna (paket)",
+   "options": "Item"
+  },
+  {
+   "depends_on": "eval:doc.paket",
+   "fetch_from": "paket_oyna_item.custom_oyna_qalinlik_mm",
+   "fetch_if_empty": 1,
+   "fieldname": "paket_qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "2-oyna qalinligi (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ishlov_tartibi",
+   "fieldtype": "Data",
+   "label": "Ishlov tartibi",
+   "read_only": 1
+  },
+  {
+   "default": "Yakka oyna",
+   "fieldname": "tuzilma",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Tuzilma",
+   "options": "Yakka oyna\nTriplex\nSteklopaket"
+  },
+  {
+   "fieldname": "sec_hisob",
+   "fieldtype": "Section Break",
+   "label": "Hisoblangan"
+  },
+  {
+   "fieldname": "hisob_eni_mm",
+   "fieldtype": "Int",
+   "label": "Hisob eni (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hisob_boyi_mm",
+   "fieldtype": "Int",
+   "label": "Hisob bo'yi (mm)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "haqiqiy_maydon_m2",
+   "fieldtype": "Float",
+   "label": "Haqiqiy maydon (m², 1 dona)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "hisob_maydon_m2",
+   "fieldtype": "Float",
+   "label": "Hisob maydoni (m², 1 dona)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "jami_maydon_m2",
+   "fieldtype": "Float",
+   "label": "Jami hisob maydoni (m²)",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_h1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "perimetr_m",
+   "fieldtype": "Float",
+   "label": "Perimetr (m, 1 dona)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ogirlik_kg",
+   "fieldtype": "Float",
+   "label": "Og'irlik (kg, jami)",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "teshik_soni",
+   "fieldtype": "Int",
+   "label": "Teshiklar soni",
+   "read_only": 1
+  },
+  {
+   "fieldname": "kesim_soni",
+   "fieldtype": "Int",
+   "label": "Kesimlar soni",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "xulosa",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Xulosa",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tavsif",
+   "fieldtype": "Small Text",
+   "label": "Tavsif",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_narx",
+   "fieldtype": "Section Break",
+   "label": "Narx"
+  },
+  {
+   "fieldname": "oyna_tarif",
+   "fieldtype": "Currency",
+   "label": "Oyna tarifi (1 m²)",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.oyna_summa || doc.narx_qolda",
+   "fieldname": "oyna_summa",
+   "fieldtype": "Currency",
+   "label": "Oyna",
+   "options": "valyuta"
+  },
+  {
+   "description": "Shu oyna listining mijozga yozilgan foizi (chiqindi + siz qo'shgan qoldiq)",
+   "fieldname": "chiqindi_foiz",
+   "fieldtype": "Percent",
+   "label": "List sarfi % (listga nisbatan, raskroy)",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.chiqindi_summa || doc.narx_qolda",
+   "description": "Raskroy bo'yicha mijozga yozilgan list-sarfi — oyna summasiga qo'shilgan",
+   "fieldname": "chiqindi_summa",
+   "fieldtype": "Currency",
+   "label": "List sarfi summasi (oyna ichida)",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.qirra_summa || doc.narx_qolda",
+   "fieldname": "qirra_summa",
+   "fieldtype": "Currency",
+   "label": "Qirra ishlovi",
+   "options": "valyuta"
+  },
+  {
+   "depends_on": "eval:doc.burchak_summa || doc.narx_qolda",
+   "fieldname": "burchak_summa",
+   "fieldtype": "Currency",
+   "label": "Burchak ishlovi",
+   "options": "valyuta"
+  },
+  {
+   "depends_on": "eval:doc.teshik_summa || doc.narx_qolda",
+   "fieldname": "teshik_summa",
+   "fieldtype": "Currency",
+   "label": "Teshiklar",
+   "options": "valyuta"
+  },
+  {
+   "fieldname": "cb_n1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.kesim_summa || doc.narx_qolda",
+   "fieldname": "kesim_summa",
+   "fieldtype": "Currency",
+   "label": "Kesimlar",
+   "options": "valyuta"
+  },
+  {
+   "depends_on": "eval:doc.reska_summa || doc.narx_qolda",
+   "fieldname": "reska_summa",
+   "fieldtype": "Currency",
+   "label": "Reska (kesish)",
+   "options": "valyuta",
+   "read_only": 0
+  },
+  {
+   "depends_on": "eval:doc.boyash_summa || doc.narx_qolda",
+   "fieldname": "boyash_summa",
+   "fieldtype": "Currency",
+   "label": "Bo'yash",
+   "options": "valyuta",
+   "read_only": 0
+  },
+  {
+   "depends_on": "eval:doc.paket_summa || doc.narx_qolda",
+   "fieldname": "paket_summa",
+   "fieldtype": "Currency",
+   "label": "Paket yig'ish",
+   "options": "valyuta",
+   "read_only": 0
+  },
+  {
+   "depends_on": "eval:doc.matofka_summa || doc.narx_qolda",
+   "fieldname": "matofka_summa",
+   "fieldtype": "Currency",
+   "label": "Matofka",
+   "options": "valyuta"
+  },
+  {
+   "depends_on": "eval:doc.zakalka_summa || doc.narx_qolda",
+   "fieldname": "zakalka_summa",
+   "fieldtype": "Currency",
+   "label": "Zakalka",
+   "options": "valyuta"
+  },
+  {
+   "depends_on": "eval:doc.markirovka_summa || doc.narx_qolda",
+   "fieldname": "markirovka_summa",
+   "fieldtype": "Currency",
+   "label": "Markirovka",
+   "options": "valyuta"
+  },
+  {
+   "default": "0",
+   "description": "Belgilansa kategoriya-summalar qayta hisoblanmaydi (faqat yig'indi)",
+   "fieldname": "narx_qolda",
+   "fieldtype": "Check",
+   "label": "Narx qo'lda"
+  },
+  {
+   "depends_on": "eval:doc.narx_qolda",
+   "fieldname": "narx_izoh",
+   "fieldtype": "Data",
+   "label": "Narx izohi (sabab)"
+  },
+  {
+   "default": "0",
+   "fieldname": "taxminiy",
+   "fieldtype": "Check",
+   "label": "TAXMINIY tarif ishlatilgan",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "summa",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Pozitsiya summasi",
+   "options": "valyuta",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-12 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Zakaz Pozitsiya",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

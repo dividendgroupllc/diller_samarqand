@@ -1,0 +1,117 @@
+{
+ "actions": [],
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "pozitsiya_nr",
+  "tur",
+  "eni_mm",
+  "boyi_mm",
+  "x_mm",
+  "y_mm",
+  "ichki_radius_mm",
+  "soni",
+  "izoh",
+  "narx",
+  "summa"
+ ],
+ "fields": [
+  {
+   "fieldname": "pozitsiya_nr",
+   "fieldtype": "Int",
+   "label": "Pozitsiya №",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "tur",
+   "fieldtype": "Select",
+   "label": "Turi",
+   "options": "Fortochka\nQulf\nRozetka\nBoshqa",
+   "reqd": 1,
+   "default": "Fortochka",
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "eni_mm",
+   "fieldtype": "Int",
+   "label": "Eni (mm)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "boyi_mm",
+   "fieldtype": "Int",
+   "label": "Bo'yi (mm)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "x_mm",
+   "fieldtype": "Int",
+   "label": "X (mm, chapdan)",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "y_mm",
+   "fieldtype": "Int",
+   "label": "Y (mm, pastdan)",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "ichki_radius_mm",
+   "fieldtype": "Int",
+   "label": "Ichki radius (mm)"
+  },
+  {
+   "fieldname": "soni",
+   "fieldtype": "Int",
+   "label": "Soni",
+   "default": "1",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "izoh",
+   "fieldtype": "Data",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "narx",
+   "fieldtype": "Currency",
+   "label": "Narx (1 kesim)",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "fieldname": "summa",
+   "fieldtype": "Currency",
+   "label": "Summa",
+   "options": "valyuta",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Zakaz Kesim",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1
+}

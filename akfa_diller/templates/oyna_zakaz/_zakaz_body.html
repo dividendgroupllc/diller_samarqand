@@ -1,0 +1,168 @@
+{#- Umumiy tana: PDF (download_pdf) va Print Format ikkalasi shu faylni ishlatadi -#}
+<style>
+.oz { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9pt; color: #111; line-height: 1.35; }
+.oz * { box-sizing: border-box; }
+.oz-band { background: #0f2942; color: #fff; padding: 9pt 12pt; border-radius: 4pt; display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8pt; }
+.oz-band .kick { font-size: 7pt; letter-spacing: 1.5pt; text-transform: uppercase; opacity: .75; }
+.oz-band .ttl { font-size: 16pt; font-weight: 700; margin-top: 2pt; }
+.oz-band .meta { text-align: right; font-size: 8.5pt; }
+.oz-band .meta b { font-weight: 600; }
+.oz-card { border: 0.6pt solid #cbd5e1; border-radius: 4pt; padding: 6pt 7pt; margin-bottom: 7pt; break-inside: avoid; page-break-inside: avoid; }
+.oz-card--full { break-before: page; page-break-before: always; }
+.oz-card--full.oz-first { break-before: auto; page-break-before: auto; }
+.oz-card__head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 0.6pt solid #e2e8f0; padding-bottom: 3pt; margin-bottom: 5pt; }
+.oz-card__head .nr { font-size: 11pt; font-weight: 700; color: #0f2942; }
+.oz-card__head .sum { font-size: 10.5pt; font-weight: 700; }
+.oz-card__grid { display: flex; gap: 8pt; }
+.oz-card__grid .dr { flex: 0 0 96mm; }
+.oz-card--full .oz-card__grid { display: block; }
+.oz-card--full .oz-card__grid .dr { width: 186mm; margin: 0 auto 6pt; }
+.oz-card__grid .dr svg { width: 100%; height: auto; border: 0.4pt solid #e2e8f0; }
+.oz-spec { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+.oz-spec th { text-align: left; color: #64748b; font-weight: 500; padding: 1.5pt 4pt 1.5pt 0; width: 26%; vertical-align: top; white-space: nowrap; }
+.oz-spec td { padding: 1.5pt 0; vertical-align: top; }
+.oz-card--full .oz-spec { column-count: 2; column-gap: 12pt; display: block; }
+.oz-card--full .oz-spec tr { display: block; break-inside: avoid; }
+.oz-card--full .oz-spec th, .oz-card--full .oz-spec td { display: inline-block; }
+.oz-card--full .oz-spec th { width: 34%; }
+.oz-narx { width: 100%; border-collapse: collapse; margin-top: 5pt; font-size: 8.5pt; }
+.oz-narx td { padding: 1pt 0; border-top: 0.4pt dotted #cbd5e1; }
+.oz-narx td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.oz-narx tr.t td { border-top: 0.8pt solid #0f2942; font-weight: 700; }
+.oz-tot { width: 100%; border-collapse: collapse; margin-top: 8pt; font-size: 9pt; break-inside: avoid; page-break-inside: avoid; }
+.oz-tot td { padding: 2.5pt 6pt; border-bottom: 0.4pt solid #e2e8f0; }
+.oz-tot td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.oz-tot tr.g td { background: #0f2942; color: #fff; font-weight: 700; font-size: 10.5pt; }
+.oz-tot tr.s td { background: #f1f5f9; font-weight: 600; }
+.oz-tbl { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 6pt; }
+.oz-tbl th { background: #f1f5f9; text-align: left; padding: 2.5pt 5pt; border-bottom: 0.6pt solid #cbd5e1; font-weight: 600; }
+.oz-tbl td { padding: 2pt 5pt; border-bottom: 0.4pt solid #e2e8f0; }
+.oz-tbl td.r, .oz-tbl th.r { text-align: right; }
+.oz-h { font-size: 10pt; font-weight: 700; color: #0f2942; margin: 8pt 0 3pt; }
+.oz-chk { display: flex; gap: 10pt; flex-wrap: wrap; margin-top: 6pt; font-size: 9pt; }
+.oz-chk span { border: 0.6pt solid #111; padding: 2pt 6pt; border-radius: 3pt; }
+.oz-chk span.off { color: #cbd5e1; border-color: #e2e8f0; }
+.oz-sign { display: flex; justify-content: space-between; margin-top: 16pt; font-size: 9pt; break-inside: avoid; }
+.oz-sign div { width: 45%; border-top: 0.6pt solid #111; padding-top: 3pt; color: #475569; }
+.oz-note { font-size: 8pt; color: #64748b; margin-top: 6pt; }
+.oz-list .dr { width: 186mm; margin: 0 auto 5pt; }
+.oz-list .dr svg { width: 186mm; height: auto; display: block; }
+.oz-list .oz-tbl { font-size: 8pt; }
+.oz-note--rk { background: #f1f5f9; padding: 4pt 6pt; border-radius: 3pt; color: #334155; }
+.oz-badge { display: inline-block; font-size: 7pt; font-weight: 700; padding: 1pt 4pt; border-radius: 2pt; background: #111; color: #fff; margin-left: 4pt; vertical-align: middle; }
+</style>
+<div class="oz">
+  <div class="oz-band">
+    <div>
+      <div class="kick">Oyna sex · oyna zakaz</div>
+      <div class="ttl">{{ title }} · {{ doc.name }}</div>
+      <div style="font-size:8.5pt;margin-top:3pt;opacity:.9">{{ (doc.customer_name or doc.customer)|e }}{% if doc.telefon %} · {{ doc.telefon|e }}{% endif %}</div>
+    </div>
+    <div class="meta">
+      <div>Sana: <b>{{ sana(doc.sana) }}</b></div>
+      <div>Yetkazish: <b>{{ sana(doc.yetkazish_sanasi) if doc.yetkazish_sanasi else '—' }}</b></div>
+      <div>Holat: <b>{{ doc.holat }}</b>{% if doc.sales_invoice %} · {{ doc.sales_invoice }}{% endif %}</div>
+      <div>{{ doc.pozitsiya_soni }} pozitsiya · {{ doc.dona_jami }} dona · {{ "%.3f"|format(doc.jami_kvadrat or 0) }} m² · {{ "%.1f"|format(doc.ogirlik_kg or 0) }} kg</div>
+    </div>
+  </div>
+
+  {% for z in pozitsiyalar %}
+  {% set p = z.p %}
+  <div class="oz-card{% if z.dense %} oz-card--full{% endif %}{% if loop.first %} oz-first{% endif %}">
+    <div class="oz-card__head">
+      <div class="nr">№{{ p.nr }} · {{ p.oyna_item|e }} · {{ p.olcham_matn }} · {{ p.dona }} dona
+        {% if p.zakalka %}<span class="oz-badge">ZAKALKA</span>{% endif %}
+        {% if p.matofka_rejimi and p.matofka_rejimi != "Yo'q" %}<span class="oz-badge">MATOFKA</span>{% endif %}
+        {% if p.mijoz_oynasi %}<span class="oz-badge">MIJOZ OYNASI</span>{% endif %}
+      </div>
+      {% if variant == 'taklif' %}<div class="sum">{{ pul(p.summa) }}</div>{% endif %}
+    </div>
+    <div class="oz-card__grid">
+      <div class="dr">{{ z.svg }}</div>
+      <div style="flex:1">
+        <table class="oz-spec">
+          <tr><th>Oyna</th><td>{{ p.oyna_item|e }} ({{ p.qalinlik_mm }} mm{% if p.rang %}, {{ p.rang|e }}{% endif %})</td></tr>
+          <tr><th>Shakl / o'lcham</th><td>{{ p.shakl }} · {{ p.olcham_matn }} mm{% if p.shakl == 'Erkin shakl' and p.perimetr_mm %} · perimetr {{ p.perimetr_mm }} mm{% endif %}</td></tr>
+          <tr><th>Dona</th><td>{{ p.dona }}</td></tr>
+          <tr><th>Qirra</th><td>{% if z.qirra %}{% for b, t in z.qirra %}{{ b }} {{ t }}{% if t in z.kenglikli %} {{ p.faska_kengligi_mm }} mm{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>
+          <tr><th>Burchaklar</th><td>{% if z.burchak %}{% for nom, t, mm in z.burchak %}{{ nom }}: {{ t }} {{ mm }} mm{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>
+          <tr><th>Teshiklar</th><td>{% if z.teshiklar %}{% for t in z.teshiklar %}Ø{{ t.diametr_mm }}{% if t.x_mm and t.y_mm %} ({{ t.x_mm }}, {{ t.y_mm }}){% endif %}{% if (t.soni or 1) > 1 %} ×{{ t.soni }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>
+          <tr><th>Kesimlar</th><td>{% if z.kesimlar %}{% for x in z.kesimlar %}{{ x.tur }} {{ x.eni_mm }}×{{ x.boyi_mm }}{% if x.x_mm is not none and x.x_mm != '' %} ({{ x.x_mm }}, {{ x.y_mm }}){% endif %}{% if x.ichki_radius_mm %} R{{ x.ichki_radius_mm }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>
+          <tr><th>Matofka</th><td>{% if p.matofka_rejimi and p.matofka_rejimi != "Yo'q" %}{{ p.matofka_rejimi }}{% if p.matofka_rejimi == 'Qisman' %} · {{ "%.3f"|format(p.matofka_maydoni_m2 or 0) }} m²{% if p.matofka_w %} · {{ p.matofka_w }}×{{ p.matofka_h }} @ ({{ p.matofka_x }}, {{ p.matofka_y }}){% endif %}{% endif %}{% else %}—{% endif %}</td></tr>
+          <tr><th>Zakalka</th><td>{{ 'Ha' if p.zakalka else '—' }}</td></tr>
+          {% if p.markirovka %}<tr><th>Markirovka</th><td>{{ (p.markirovka_matn or 'Ha')|e }}</td></tr>{% endif %}
+          <tr><th>Ko'rinish</th><td>{{ p.korinish or 'Old tomondan' }}</td></tr>
+          <tr><th>m² / kg</th><td>{{ "%.4f"|format(p.haqiqiy_maydon_m2 or 0) }} m² haqiqiy · {{ "%.4f"|format(p.hisob_maydon_m2 or 0) }} m² hisob · {{ "%.2f"|format(p.ogirlik_kg or 0) }} kg</td></tr>
+          {% if variant == 'talon' %}<tr><th>Ishlov tartibi</th><td>{{ p.ishlov_tartibi or '—' }}</td></tr>{% endif %}
+          {% if z.aksessuarlar %}<tr><th>Aksessuarlar</th><td>{% for a in z.aksessuarlar %}{{ (a.item_name or a.item)|e }} ×{{ son(a.qty) }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>{% endif %}
+          {% if p.izoh %}<tr><th>Izoh</th><td>{{ p.izoh|e }}</td></tr>{% endif %}
+        </table>
+        {% if variant == 'taklif' and z.narx_qatorlar %}
+        <table class="oz-narx">
+          {% for lbl, sm in z.narx_qatorlar %}<tr><td>{{ lbl }}</td><td class="r">{{ pul(sm) }}</td></tr>{% endfor %}
+          <tr class="t"><td>Pozitsiya jami{% if p.narx_qolda %} (qo'lda{% if p.narx_izoh %}: {{ p.narx_izoh|e }}{% endif %}){% endif %}</td><td class="r">{{ pul(p.summa) }}</td></tr>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+    {% if variant == 'talon' %}
+    <div class="oz-chk">{% for nom, on in z.checklist %}<span{% if not on %} class="off"{% endif %}>☐ {{ nom }}</span>{% endfor %}</div>
+    <div class="oz-sign"><div>Usta: ____________________</div><div>Sana / vaqt: ____________________</div></div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if variant == 'taklif' %}
+    {% if aksessuarlar %}
+    <div class="oz-h">Aksessuarlar</div>
+    <table class="oz-tbl">
+      <tr><th>Nomi</th><th>Pozitsiya</th><th class="r">Miqdor</th><th>Birlik</th><th class="r">Narx</th><th class="r">Summa</th></tr>
+      {% for a in aksessuarlar %}<tr><td>{{ (a.item_name or a.item)|e }}</td><td>{{ '№' ~ a.pozitsiya_nr if a.pozitsiya_nr else 'zakaz' }}</td><td class="r">{{ son(a.qty) }}</td><td>{{ a.uom or '' }}</td><td class="r">{{ pul(a.narx) }}</td><td class="r">{{ pul(a.summa) }}</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+    <table class="oz-tot">
+      {% for lbl, sm in jami %}<tr><td>{{ lbl }}</td><td class="r">{{ pul(sm) }}</td></tr>{% endfor %}
+      <tr class="s"><td>Pozitsiyalar + aksessuarlar</td><td class="r">{{ pul((doc.pozitsiyalar_jami or 0) + (doc.aksessuar_jami or 0)) }}</td></tr>
+      <tr class="g"><td>JAMI</td><td class="r">{{ pul(doc.jami_summa) }}</td></tr>
+      {% if doc.oldindan_tolov %}<tr><td>Oldindan to'lov</td><td class="r">{{ pul(doc.oldindan_tolov) }}</td></tr>
+      <tr class="s"><td>Qoldiq</td><td class="r">{{ pul(doc.qoldiq) }}</td></tr>{% endif %}
+    </table>
+    {% if raskroy and raskroy.bor %}<div class="oz-note oz-note--rk"><b>Raskroy:</b> {{ raskroy.list_soni }} list ({{ raskroy.listlar_matn }}); bo'laklar {{ raskroy.foydalanish }} % list, chiqindi {{ raskroy.chiqindi_foiz }} %; mijozga list-sarfi <b>{{ raskroy.mijoz_foiz }} %</b> yozildi ({{ pul(raskroy.chiqindi_summa) }}, oyna narxi ichida){% if raskroy.itemlar_matn %} — {{ raskroy.itemlar_matn }}{% endif %}.{% if raskroy.eskirgan %} <b>DIQQAT: reja ESKIRGAN — qayta tuzilsin.</b>{% endif %}</div>{% endif %}
+    {% if doc.izoh %}<div class="oz-note">Izoh: {{ doc.izoh|e }}</div>{% endif %}
+    <div class="oz-note">O'lchamlar 10 mm ga yuqoriga yaxlitlanadi; minimal hisob maydoni 0.25 m². Teshik/kesim koordinatalari chap va pastki qirradan (mm), old tomondan qaraganda.</div>
+    <div class="oz-sign"><div>Mijoz: ____________________</div><div>Menedjer: ____________________</div></div>
+  {% else %}
+    {% if raskroy %}{% for L in raskroy.listlar %}
+    <div class="oz-card oz-card--full oz-list">
+      <div class="oz-card__head">
+        <div class="nr">LIST {{ L.n }}/{{ L.N }} — {{ L.item|e }} · {{ L.W }}×{{ L.H }} mm{% if L.butun_list %}<span class="oz-badge">BUTUN LIST</span>{% endif %}{% if raskroy.eskirgan %}<span class="oz-badge">ESKIRGAN</span>{% endif %}</div>
+        <div class="sum">foydalanish {{ L.foydalanish_foiz }} %</div>
+      </div>
+      <div class="dr">{{ L.svg }}</div>
+      <table class="oz-tbl">
+        <tr><th>№</th><th>Buyurtma o'lchami</th><th>Listda (eni×bo'yi)</th><th>Burilgan</th><th>Joy x, y (mm)</th></tr>
+        {% for b in L.bolaklar %}<tr><td>№{{ b.nr }}{% if (b.dona or 1) > 1 %}/{{ b.idx }}{% endif %}</td><td>{{ b.olcham_matn or '' }}</td><td>{{ b.w }}×{{ b.h }}</td><td>{{ '↻ ha' if b.burilgan else '—' }}</td><td>{{ b.x }}, {{ b.y }}</td></tr>{% endfor %}
+      </table>
+      {% if L.qoldiqlar %}<div class="oz-h">{% if L.qoldiq_mijozga %}Qoldiqlar — MIJOZGA BERILADI (butun list to'langan){% else %}Qoldiqlar (saqlanadi, narxga kirmaydi){% endif %}</div>
+      <table class="oz-tbl"><tr><th>O'lcham</th><th class="r">m²</th><th>Joy x, y (mm)</th></tr>
+      {% for q in L.qoldiqlar %}<tr><td>{{ q.w }}×{{ q.h }}</td><td class="r">{{ "%.2f"|format(q.m2) }}</td><td>{{ q.x }}, {{ q.y }}</td></tr>{% endfor %}</table>{% endif %}
+      <div class="oz-note">Bo'laklar {{ "%.2f"|format(L.bolaklar_m2) }} m² · qoldiq {{ "%.2f"|format(L.qoldiq_m2) }} m² · chiqindi {{ "%.2f"|format(L.chiqindi_m2) }} m². Koordinatalar listning chap-pastki burchagidan. Kesish tartibi — xaritadagi raqamlar (1–4 chekka-qirqim, keyin to'liq gilyotin-kesimlar).</div>
+      {% if L.qoldiq_mijozga %}<div class="oz-note oz-note--rk"><b>QOLDIQ MIJOZGA BERILADI</b> — qoldiq bo'laklarni ham zakaz bilan birga tayyorlang (mijoz butun listni to'lagan).</div>{% endif %}
+      <div class="oz-chk"><span>☐ Kesildi</span><span>☐ {{ "Qoldiq mijozga qo'shildi" if L.qoldiq_mijozga else "Qoldiq belgilandi" }}</span><span>☐ Chiqindi olib tashlandi</span></div>
+      <div class="oz-sign"><div>Usta: ____________________</div><div>Sana / vaqt: ____________________</div></div>
+    </div>
+    {% endfor %}{% endif %}
+    {% if materiallar or umumiy_aks %}
+    <div class="oz-card oz-card--full">
+      <div class="oz-h">Materiallar (sarf)</div>
+      {% if raskroy and raskroy.oyna_bor %}<div class="oz-note oz-note--rk">{% if raskroy.holat == 'Dolzarb' %}Sarf = raskroy bo'yicha: {{ raskroy.list_soni }} list, ishlatilgan maydon = list − qoldiq (qoldiq {{ "%.2f"|format(raskroy.qoldiq_m2) }} m² omborda qoladi). Mijozga list-sarfi {{ raskroy.mijoz_foiz }} % yozilgan.{% elif raskroy.eskirgan %}<b>Raskroy ESKIRGAN</b> — sarf jadval foizi bilan (taxminiy); rejani qayta tuzing.{% else %}Raskroy tuzilmagan — sarf jadval chiqindi-foizi bilan (taxminiy).{% endif %}</div>{% endif %}
+      <table class="oz-tbl"><tr><th>Material</th><th class="r">Miqdor</th><th>Birlik</th><th>Ombor</th></tr>
+      {% for m in materiallar %}<tr><td>{{ (m.item_name or m.item_code)|e }}</td><td class="r">{{ son(m.qty) }}</td><td>{{ m.uom or '' }}</td><td>{{ m.warehouse or '' }}</td></tr>{% endfor %}</table>
+      {% if umumiy_aks %}<div class="oz-h">Zakaz-darajali aksessuarlar</div>
+      <table class="oz-tbl"><tr><th>Nomi</th><th class="r">Miqdor</th><th>Birlik</th></tr>
+      {% for a in umumiy_aks %}<tr><td>{{ (a.item_name or a.item)|e }}</td><td class="r">{{ son(a.qty) }}</td><td>{{ a.uom or '' }}</td></tr>{% endfor %}</table>{% endif %}
+      {% if doc.izoh %}<div class="oz-note">Izoh: {{ doc.izoh|e }}</div>{% endif %}
+    </div>
+    {% endif %}
+  {% endif %}
+</div>

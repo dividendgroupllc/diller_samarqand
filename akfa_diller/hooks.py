@@ -26,6 +26,8 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/akfa_diller/css/akfa_diller.css"
+# Oyna Zakaz konfigurator stillari (hammasi `.oz-` prefiksli — boshqa sahifalarga tegmaydi)
+app_include_css = "/assets/akfa_diller/css/oyna_zakaz.css"
 # app_include_js = "/assets/akfa_diller/js/akfa_diller.js"
 
 # include js, css files in header of web template
@@ -46,6 +48,7 @@ app_license = "mit"
 doctype_js = {
 	"Sales Order": "public/js/sales_order.js",
 	"Purchase Invoice": "public/js/purchase_invoice.js",
+	"Oyna Zakaz": "public/js/oyna_pozitsiya_dialog.js",
 }
 doctype_list_js = {"Sales Order": "public/js/sales_order_list.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
@@ -78,10 +81,13 @@ doctype_list_js = {"Sales Order": "public/js/sales_order_list.js"}
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "akfa_diller.utils.jinja_methods",
-# 	"filters": "akfa_diller.utils.jinja_filters"
-# }
+# Oyna Zakaz Print Format uchun (chizma + print-kontekst)
+jinja = {
+	"methods": [
+		"akfa_diller.akfa_diller.api.oyna_zakaz_jinja.oyna_zakaz_svg",
+		"akfa_diller.akfa_diller.api.oyna_zakaz_jinja.oyna_zakaz_print_ctx",
+	],
+}
 
 # Installation
 # ------------
@@ -187,6 +193,8 @@ doc_events = {
 after_migrate = [
 	"akfa_diller.akfa_diller.api.report_roles.ensure_roles_on_all_custom_reports",
 	"akfa_diller.akfa_diller.api.exchange.ensure_custom_fields",
+	# Oyna Zakaz (TEST rejimi): tarif-jadval + Item maydonlari. Sales Order/Invoice'ga tegmaydi.
+	"akfa_diller.akfa_diller.api.oyna_konfigurator.ensure_setup",
 ]
 
 # Scheduled Tasks

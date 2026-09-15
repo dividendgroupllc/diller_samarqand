@@ -1,0 +1,657 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sec_asosiy",
+  "naming_series",
+  "customer",
+  "customer_name",
+  "telefon",
+  "sana",
+  "yetkazish_sanasi",
+  "cb_a1",
+  "company",
+  "holat",
+  "sales_invoice",
+  "material_issue",
+  "valyuta",
+  "standart_rejimi",
+  "izoh",
+  "sec_pozitsiyalar",
+  "chizmalar_html",
+  "pozitsiyalar",
+  "sec_texnik",
+  "teshiklar",
+  "kesimlar",
+  "sec_aksessuar",
+  "aksessuarlar",
+  "sec_jami",
+  "pozitsiya_soni",
+  "dona_jami",
+  "haqiqiy_kvadrat",
+  "jami_kvadrat",
+  "material_kvadrat",
+  "chiqindi_izoh_html",
+  "ogirlik_kg",
+  "cb_j1",
+  "oyna_jami",
+  "qirra_jami",
+  "burchak_jami",
+  "teshik_jami",
+  "kesim_jami",
+  "reska_jami",
+  "boyash_jami",
+  "paket_jami",
+  "matofka_jami",
+  "zakalka_jami",
+  "markirovka_jami",
+  "aksessuar_jami",
+  "cb_j2",
+  "pozitsiyalar_jami",
+  "jami_summa",
+  "oldindan_tolov",
+  "qoldiq",
+  "sec_raskroy",
+  "raskroy_izoh_html",
+  "listlar",
+  "raskroy_html",
+  "sec_raskroy_reja",
+  "raskroy_reja",
+  "sec_raskroy_natija",
+  "raskroy_holat",
+  "raskroy_list_soni",
+  "raskroy_bolaklar_m2",
+  "raskroy_qoldiq_m2",
+  "raskroy_chiqindi_m2",
+  "cb_r1",
+  "raskroy_foydalanish_foiz",
+  "raskroy_chiqindi_foiz",
+  "raskroy_mijoz_foiz",
+  "raskroy_chiqindi_summa",
+  "raskroy_json",
+  "raskroy_imzo",
+  "sec_materiallar",
+  "materiallar_avto",
+  "materiallar",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "sec_asosiy",
+   "fieldtype": "Section Break",
+   "label": "Asosiy"
+  },
+  {
+   "default": "OYZ-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Seriya",
+   "no_copy": 1,
+   "options": "OYZ-.YYYY.-.#####",
+   "print_hide": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Mijoz",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mijoz nomi",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "customer.mobile_no",
+   "fetch_if_empty": 1,
+   "fieldname": "telefon",
+   "fieldtype": "Data",
+   "label": "Telefon"
+  },
+  {
+   "default": "Today",
+   "fieldname": "sana",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Zakaz sanasi",
+   "reqd": 1
+  },
+  {
+   "fieldname": "yetkazish_sanasi",
+   "fieldtype": "Date",
+   "label": "Yetkazish sanasi",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_a1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Oyna sex",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Kompaniya",
+   "options": "Company",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Qoralama",
+   "fieldname": "holat",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Holat",
+   "no_copy": 1,
+   "options": "Qoralama\nZakaz olindi\nTayyor\nTopshirildi\nBekor qilindi",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Sales Invoice",
+   "no_copy": 1,
+   "options": "Sales Invoice",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "material_issue",
+   "fieldtype": "Link",
+   "label": "Material Issue (tan narx)",
+   "no_copy": 1,
+   "options": "Stock Entry",
+   "read_only": 1
+  },
+  {
+   "default": "UZS",
+   "fieldname": "valyuta",
+   "fieldtype": "Link",
+   "label": "Valyuta",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "default": "Xato",
+   "description": "GOST/EN qoidalari buzilsa: Xato — saqlanmaydi; Ogohlantirish — faqat eslatadi",
+   "fieldname": "standart_rejimi",
+   "fieldtype": "Select",
+   "label": "Standart tekshiruv",
+   "options": "Xato\nOgohlantirish"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "izoh",
+   "fieldtype": "Small Text",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "sec_pozitsiyalar",
+   "fieldtype": "Section Break",
+   "label": "Pozitsiyalar"
+  },
+  {
+   "fieldname": "chizmalar_html",
+   "fieldtype": "HTML",
+   "label": "Chizmalar"
+  },
+  {
+   "fieldname": "pozitsiyalar",
+   "fieldtype": "Table",
+   "label": "Pozitsiyalar",
+   "options": "Oyna Zakaz Pozitsiya"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_texnik",
+   "fieldtype": "Section Break",
+   "label": "Teshiklar va kesimlar (texnik jadvallar)"
+  },
+  {
+   "fieldname": "teshiklar",
+   "fieldtype": "Table",
+   "label": "Teshiklar",
+   "options": "Oyna Zakaz Teshik"
+  },
+  {
+   "fieldname": "kesimlar",
+   "fieldtype": "Table",
+   "label": "Kesimlar (fortochka, qulf, rozetka…)",
+   "options": "Oyna Zakaz Kesim"
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval:(doc.aksessuarlar||[]).length",
+   "fieldname": "sec_aksessuar",
+   "fieldtype": "Section Break",
+   "label": "Aksessuarlar"
+  },
+  {
+   "fieldname": "aksessuarlar",
+   "fieldtype": "Table",
+   "label": "Aksessuarlar",
+   "options": "Oyna Zakaz Aksessuar"
+  },
+  {
+   "fieldname": "sec_jami",
+   "fieldtype": "Section Break",
+   "label": "Jami"
+  },
+  {
+   "fieldname": "pozitsiya_soni",
+   "fieldtype": "Int",
+   "label": "Pozitsiyalar soni",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dona_jami",
+   "fieldtype": "Int",
+   "label": "Jami dona",
+   "read_only": 1
+  },
+  {
+   "fieldname": "haqiqiy_kvadrat",
+   "fieldtype": "Float",
+   "label": "Haqiqiy kvadrat (m²)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "description": "Mijozga hisoblangan m² — Sales Invoice'ga «Jami kvadrat» sifatida o'tadi",
+   "fieldname": "jami_kvadrat",
+   "fieldtype": "Float",
+   "label": "Hisob kvadrat (m²)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "material_kvadrat",
+   "fieldtype": "Float",
+   "label": "Material kvadrat (m², chiqindi bilan)",
+   "precision": "3",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chiqindi_izoh_html",
+   "fieldtype": "HTML",
+   "label": "Chiqindi izohi"
+  },
+  {
+   "fieldname": "ogirlik_kg",
+   "fieldtype": "Float",
+   "label": "Og'irlik (kg)",
+   "precision": "1",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_j1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.oyna_jami",
+   "fieldname": "oyna_jami",
+   "fieldtype": "Currency",
+   "label": "Oyna",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.qirra_jami",
+   "fieldname": "qirra_jami",
+   "fieldtype": "Currency",
+   "label": "Qirra ishlovi",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.burchak_jami",
+   "fieldname": "burchak_jami",
+   "fieldtype": "Currency",
+   "label": "Burchak ishlovi",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.teshik_jami",
+   "fieldname": "teshik_jami",
+   "fieldtype": "Currency",
+   "label": "Teshiklar",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.kesim_jami",
+   "fieldname": "kesim_jami",
+   "fieldtype": "Currency",
+   "label": "Kesimlar",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.reska_jami",
+   "fieldname": "reska_jami",
+   "fieldtype": "Currency",
+   "label": "Reska (kesish)",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.boyash_jami",
+   "fieldname": "boyash_jami",
+   "fieldtype": "Currency",
+   "label": "Bo'yash",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.paket_jami",
+   "fieldname": "paket_jami",
+   "fieldtype": "Currency",
+   "label": "Paket yig'ish",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.matofka_jami",
+   "fieldname": "matofka_jami",
+   "fieldtype": "Currency",
+   "label": "Matofka",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.zakalka_jami",
+   "fieldname": "zakalka_jami",
+   "fieldtype": "Currency",
+   "label": "Zakalka",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.markirovka_jami",
+   "fieldname": "markirovka_jami",
+   "fieldtype": "Currency",
+   "label": "Markirovka",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.aksessuar_jami",
+   "fieldname": "aksessuar_jami",
+   "fieldtype": "Currency",
+   "label": "Aksessuarlar",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_j2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pozitsiyalar_jami",
+   "fieldtype": "Currency",
+   "label": "Pozitsiyalar jami",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "jami_summa",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Jami summa",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "oldindan_tolov",
+   "fieldtype": "Currency",
+   "label": "Oldindan to'lov",
+   "options": "valyuta"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "qoldiq",
+   "fieldtype": "Currency",
+   "label": "Qoldiq",
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:(doc.pozitsiyalar||[]).length",
+   "fieldname": "sec_raskroy",
+   "fieldtype": "Section Break",
+   "label": "Raskroy — listdan kesish rejasi"
+  },
+  {
+   "fieldname": "raskroy_izoh_html",
+   "fieldtype": "HTML",
+   "label": "Raskroy izohi"
+  },
+  {
+   "description": "Tizim har oyna uchun qator qo'shadi va oxirgi ishlatilgan o'lchamni yozadi — kerak bo'lsa o'zgartiring, so'ng «Raskroy tuzish»",
+   "fieldname": "listlar",
+   "fieldtype": "Table",
+   "label": "Listlar (har oyna uchun ombordagi list o'lchami)",
+   "options": "Oyna Zakaz List"
+  },
+  {
+   "fieldname": "raskroy_html",
+   "fieldtype": "HTML",
+   "label": "Raskroy xaritasi"
+  },
+  {
+   "depends_on": "eval:doc.raskroy_holat && doc.raskroy_holat!='Yo\\'q'",
+   "description": "Rangli xaritadagi har list uchun: «Mijozga qo'shimcha %» — bo'laklardan tashqari mijozga yoziladigan list-foizi (default = chiqindi). Qoldiqni ham sotmoqchi bo'lsangiz oshiring yoki «Qoldiq mijozga»ni belgilang. So'ng saqlang.",
+   "fieldname": "sec_raskroy_reja",
+   "fieldtype": "Section Break",
+   "label": "Har list bo'yicha: bo'laklar / chiqindi / qoldiq → mijozga %"
+  },
+  {
+   "fieldname": "raskroy_reja",
+   "fieldtype": "Table",
+   "label": "Listlar rejasi — har list bo'yicha mijozga yoziladigan %",
+   "no_copy": 1,
+   "options": "Oyna Zakaz List Reja",
+   "read_only": 0
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.raskroy_holat && doc.raskroy_holat!='Yo\\'q'",
+   "fieldname": "sec_raskroy_natija",
+   "fieldtype": "Section Break",
+   "label": "Raskroy natijasi (jadval)"
+  },
+  {
+   "default": "Yo'q",
+   "fieldname": "raskroy_holat",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Raskroy holati",
+   "no_copy": 1,
+   "options": "Yo'q\nDolzarb\nEskirgan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_list_soni",
+   "fieldtype": "Int",
+   "label": "Listlar soni",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_bolaklar_m2",
+   "fieldtype": "Float",
+   "label": "Bo'laklar (m²)",
+   "no_copy": 1,
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_qoldiq_m2",
+   "fieldtype": "Float",
+   "label": "Qoldiq — omborda qoladi (m²)",
+   "no_copy": 1,
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_chiqindi_m2",
+   "fieldtype": "Float",
+   "label": "Chiqindi (m²)",
+   "no_copy": 1,
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cb_r1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "raskroy_foydalanish_foiz",
+   "fieldtype": "Percent",
+   "label": "Bo'laklar % (listlarga nisbatan)",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_chiqindi_foiz",
+   "fieldtype": "Percent",
+   "label": "Chiqindi % (listlarga nisbatan)",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_mijoz_foiz",
+   "fieldtype": "Percent",
+   "label": "Mijozga qo'shimcha % (listlarga nisbatan)",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_chiqindi_summa",
+   "fieldtype": "Currency",
+   "label": "Mijozga yozilgan list-sarfi (summa)",
+   "no_copy": 1,
+   "options": "valyuta",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_json",
+   "fieldtype": "Long Text",
+   "hidden": 1,
+   "label": "Raskroy JSON",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "raskroy_imzo",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Raskroy imzo",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_materiallar",
+   "fieldtype": "Section Break",
+   "label": "Sarflanadigan materiallar"
+  },
+  {
+   "default": "1",
+   "description": "O'chirilsa jadval qo'lda yuritiladi (oynalar chiqindi foizi bilan hisoblanadi)",
+   "fieldname": "materiallar_avto",
+   "fieldtype": "Check",
+   "label": "Materiallar avtomatik hisoblansin"
+  },
+  {
+   "fieldname": "materiallar",
+   "fieldtype": "Table",
+   "label": "Materiallar",
+   "options": "Oyna Sarflangan Tovar"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Oyna Zakaz",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-12 13:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Zakaz",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "customer_name,sales_invoice",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "customer_name",
+ "track_changes": 1
+}

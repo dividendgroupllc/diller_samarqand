@@ -1,0 +1,60 @@
+{
+ "actions": [],
+ "creation": "2026-09-04 03:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "qalinlik_mm",
+  "diametr_gacha",
+  "narx",
+  "izoh"
+ ],
+ "fields": [
+  {
+   "fieldname": "qalinlik_mm",
+   "fieldtype": "Int",
+   "label": "Qalinlik gacha (mm)",
+   "in_list_view": 1,
+   "columns": 3,
+   "description": "Shu qalinlikkacha shu narx: 4 → ≤4 mm, 6 → 5–6 mm, 10 → 7–10 mm. 0 = har qanday qalinlik (zaxira qator)"
+  },
+  {
+   "fieldname": "diametr_gacha",
+   "fieldtype": "Int",
+   "label": "Ø gacha (mm)",
+   "in_list_view": 1,
+   "reqd": 1,
+   "columns": 2,
+   "description": "Shu diametrgacha shu narx (masalan 20, 50, 200)"
+  },
+  {
+   "fieldname": "narx",
+   "fieldtype": "Currency",
+   "label": "Narx (so'm / teshik)",
+   "in_list_view": 1,
+   "reqd": 1,
+   "columns": 3,
+   "options": "valyuta"
+  },
+  {
+   "fieldname": "izoh",
+   "fieldtype": "Data",
+   "label": "Izoh",
+   "in_list_view": 1,
+   "columns": 2
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-04 04:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Akfa diller",
+ "name": "Oyna Narx Teshik",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
